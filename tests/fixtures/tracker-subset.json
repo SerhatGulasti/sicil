@@ -1,0 +1,361 @@
+[
+{
+"name": "AVG-2842",
+"packages": [
+"libtiff"
+],
+"status": "Unknown",
+"severity": "Unknown",
+"type": "unknown",
+"affected": "4.4.0-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2022-48281",
+"CVE-2022-3970",
+"CVE-2022-3627",
+"CVE-2022-3599",
+"CVE-2022-3597",
+"CVE-2022-3570",
+"CVE-2022-34526",
+"CVE-2022-2953",
+"CVE-2022-2869",
+"CVE-2022-2868",
+"CVE-2022-2867",
+"CVE-2022-2521",
+"CVE-2022-2520",
+"CVE-2022-2519",
+"CVE-2022-2058",
+"CVE-2022-2057",
+"CVE-2022-2056",
+"CVE-2022-1623",
+"CVE-2022-1622"
+],
+"advisories": []
+},
+{
+"name": "AVG-2901",
+"packages": [
+"pam"
+],
+"status": "Vulnerable",
+"severity": "High",
+"type": "arbitrary filesystem access",
+"affected": "1.7.0-2",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2025-6020"
+],
+"advisories": []
+},
+{
+"name": "AVG-2898",
+"packages": [
+"libxml2"
+],
+"status": "Vulnerable",
+"severity": "High",
+"type": "denial of service",
+"affected": "2.14.4-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2025-6170",
+"CVE-2025-49796",
+"CVE-2025-49795",
+"CVE-2025-49794"
+],
+"advisories": []
+},
+{
+"name": "AVG-2893",
+"packages": [
+"systemd"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "257.6-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2025-4598"
+],
+"advisories": []
+},
+{
+"name": "AVG-2885",
+"packages": [
+"coreutils"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "9.7-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2025-5278"
+],
+"advisories": []
+},
+{
+"name": "AVG-2850",
+"packages": [
+"openjpeg2"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "arbitrary code execution",
+"affected": "2.5.0-3",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2021-3575"
+],
+"advisories": []
+},
+{
+"name": "AVG-2765",
+"packages": [
+"openssl"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "arbitrary command execution",
+"affected": "1.1.1.o-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2022-2068"
+],
+"advisories": []
+},
+{
+"name": "AVG-2721",
+"packages": [
+"libtiff"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "denial of service",
+"affected": "4.3.0-2",
+"fixed": null,
+"ticket": "74772",
+"issues": [
+"CVE-2022-1355",
+"CVE-2022-1354"
+],
+"advisories": []
+},
+{
+"name": "AVG-2630",
+"packages": [
+"perl"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "signature forgery",
+"affected": "5.34.0-3",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2020-16156"
+],
+"advisories": []
+},
+{
+"name": "AVG-2520",
+"packages": [
+"libheif"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "1.12.0-2",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2020-23109"
+],
+"advisories": []
+},
+{
+"name": "AVG-2367",
+"packages": [
+"openvpn"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "2.5.5-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2021-3773"
+],
+"advisories": []
+},
+{
+"name": "AVG-2313",
+"packages": [
+"apr"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "1.7.0-3",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2021-35940"
+],
+"advisories": []
+},
+{
+"name": "AVG-2264",
+"packages": [
+"perl"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "directory traversal",
+"affected": "5.34.0-3",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2021-36770"
+],
+"advisories": []
+},
+{
+"name": "AVG-2262",
+"packages": [
+"cpio"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "arbitrary command execution",
+"affected": "2.13-2",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2021-38185"
+],
+"advisories": []
+},
+{
+"name": "AVG-1892",
+"packages": [
+"wget"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "1.21.3-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2021-31879"
+],
+"advisories": []
+},
+{
+"name": "AVG-1855",
+"packages": [
+"giflib"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "5.2.1-2",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2020-23922"
+],
+"advisories": []
+},
+{
+"name": "AVG-1420",
+"packages": [
+"xdg-utils"
+],
+"status": "Vulnerable",
+"severity": "Medium",
+"type": "information disclosure",
+"affected": "1.1.3+19+g9816ebb-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2020-27748"
+],
+"advisories": []
+},
+{
+"name": "AVG-2890",
+"packages": [
+"perl"
+],
+"status": "Vulnerable",
+"severity": "Low",
+"type": "unknown",
+"affected": "5.40.2-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2025-40909"
+],
+"advisories": []
+},
+{
+"name": "AVG-2882",
+"packages": [
+"openssl"
+],
+"status": "Vulnerable",
+"severity": "Low",
+"type": "certificate verification bypass",
+"affected": "3.5.0-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2025-4575"
+],
+"advisories": []
+},
+{
+"name": "AVG-2615",
+"packages": [
+"ruby-bundler"
+],
+"status": "Vulnerable",
+"severity": "Low",
+"type": "arbitrary command execution",
+"affected": "2.2.26-1",
+"fixed": null,
+"ticket": null,
+"issues": [
+"CVE-2021-43809"
+],
+"advisories": []
+},
+{
+"name": "AVG-1302",
+"packages": [
+"lua51"
+],
+"status": "Vulnerable",
+"severity": "Low",
+"type": "denial of service",
+"affected": "5.1.5-9",
+"fixed": null,
+"ticket": "68703",
+"issues": [
+"CVE-2021-43519",
+"CVE-2014-5461"
+],
+"advisories": []
+}
+]
