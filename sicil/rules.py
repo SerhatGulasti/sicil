@@ -12,9 +12,11 @@ YELLOW = "yellow"
 UNVERIFIED = "unverified"
 LOOKS_CLOSED = "looks_closed"
 NOT_FOUND = "not_found"
+INFO = "info"
 
 REPO = "repo"
 AUR = "aur"
+KERNEL = "kernel"
 
 # Removal is only ever suggested after this much observation.
 OBSERVATION_DAYS = 60

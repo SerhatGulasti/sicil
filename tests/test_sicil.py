@@ -624,6 +624,7 @@ class Runs(RunCase):
         self.run_once()
         self.store.db.executescript(
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
+            " ALTER TABLE runs DROP COLUMN kernel_ok;"
             " ALTER TABLE aur_state DROP COLUMN co_maintainers;"
             " PRAGMA user_version = 1;"
         )

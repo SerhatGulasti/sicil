@@ -459,7 +459,8 @@ class Enriching(EnrichCase):
     def test_version_2_database_migrates_keeping_its_findings(self):
         self.run_once()
         self.store.db.executescript(
-            "DROP TABLE cve_cache; DROP TABLE enrich_meta; PRAGMA user_version = 2;"
+            "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
+            " ALTER TABLE runs DROP COLUMN kernel_ok; PRAGMA user_version = 2;"
         )
         self.store.close()
         self.store = Store(self.path)
@@ -472,6 +473,7 @@ class Enriching(EnrichCase):
         self.run_once()
         self.store.db.executescript(
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
+            " ALTER TABLE runs DROP COLUMN kernel_ok;"
             " ALTER TABLE aur_state DROP COLUMN co_maintainers;"
             " PRAGMA user_version = 1;"
         )

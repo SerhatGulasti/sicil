@@ -31,6 +31,7 @@ class Report:
     removal: list[dict]
     unverified: list[dict]
     looks_closed: list[dict]
+    kernels: list[dict]
     not_found: list[dict]
     closed: list[dict]
 
@@ -120,6 +121,8 @@ def load(path: str, now: int | None = None, all_findings: bool = False) -> Repor
             "repo_ok": bool(run["repo_ok"]),
             "aur_ok": bool(run["aur_ok"]),
             "yoklama_ok": bool(run["yoklama_ok"]),
+            # A database not yet migrated by `sicil run` has no such column.
+            "kernel_ok": bool(run["kernel_ok"]) if "kernel_ok" in run.keys() else True,
             "age_hours": round(age_hours, 1),
             "stale": stale,
         },
@@ -129,6 +132,7 @@ def load(path: str, now: int | None = None, all_findings: bool = False) -> Repor
         removal=_removal(current),
         unverified=by_level(rules.UNVERIFIED),
         looks_closed=by_level(rules.LOOKS_CLOSED),
+        kernels=by_level(rules.INFO),
         not_found=by_level(rules.NOT_FOUND),
         closed=sorted(
             (f for f in findings if f["closed_at"] is not None),
@@ -245,10 +249,54 @@ def _record_table(findings: list[dict]) -> list[str]:
     )
 
 
+def _kernel_summary(finding: dict) -> str:
+    """One line. "Cover" rather than "open": neither the build's configuration nor its
+    own patches are known here, so a record is not proof of a hole in this kernel.
+    """
+    d = finding["detail"]
+    parts = [f"{d['version']} (running)" if d["running"] else d["version"]]
+    if d["behind"]:
+        parts.append(f"branch latest {d['latest']}, {d['behind']} behind")
+    elif d["behind"] == 0:
+        parts.append("latest in its branch")
+    if d["repo_newer"]:
+        parts.append(f"update available: {d['repo_version']}")
+    elif d["behind"] and d["repo_version"]:
+        parts.append(f"repo still has {d['repo_version']}")
+    if d["eol"]:
+        parts.append("branch is end of life")
+    count = d["covered_count"]
+    parts.append(
+        "1 record covers this version"
+        if count == 1
+        else f"{count} records cover this version"
+    )
+    if d["behind"] and d["remaining_count"] is not None:
+        fixed = d["covered_count"] - d["remaining_count"]
+        parts.append(
+            f"{d['latest']} fixes {fixed} of them, {d['remaining_count']} remain"
+        )
+    if d["kev"]:
+        parts.append(f"in KEV: {_shorten(d['kev'], MAX_LEAVES_SHOWN)}")
+    if d["reboot_pending"]:
+        parts.append(f"reboot pending: running {d['running_version']}")
+    return "; ".join(parts)
+
+
+def _kernel_table(findings: list[dict]) -> list[str]:
+    if not findings:
+        return []
+    return _table(
+        ["PACKAGE", "SUMMARY"],
+        [[f["package"], _kernel_summary(f)] for f in findings],
+    )
+
+
 def _finding_tables(findings: list[dict]) -> list[str]:
     lines: list[str] = []
     repo = [f for f in findings if f["strip"] == rules.REPO]
     aur = [f for f in findings if f["strip"] == rules.AUR]
+    lines += _kernel_table([f for f in findings if f["strip"] == rules.KERNEL])
     if repo:
         lines += _repo_table(
             repo,
@@ -286,7 +334,8 @@ def format_text(report: Report) -> str:
     finished = time.strftime("%Y-%m-%d %H:%M", time.localtime(run["finished_at"]))
     lines = [
         f"Last run: {finished} (repo {status(run['repo_ok'])},"
-        f" aur {status(run['aur_ok'])}, yoklama {status(run['yoklama_ok'])})"
+        f" aur {status(run['aur_ok'])}, kernel {status(run['kernel_ok'])},"
+        f" yoklama {status(run['yoklama_ok'])})"
     ]
     lines += [f"Warning: {warning}" for warning in report.warnings]
 
@@ -316,6 +365,10 @@ def format_text(report: Report) -> str:
     lines += _section(
         "Looks closed (installed version is outside every CVE's affected range)",
         _record_table(report.looks_closed),
+    )
+    lines += _section(
+        "Kernels (for information, nothing to do now)",
+        _kernel_table(report.kernels),
     )
     lines += _section(
         "Not found in AUR",
@@ -353,6 +406,7 @@ def format_json(report: Report) -> str:
         "removal_suggestions": report.removal,
         "unverified": report.unverified,
         "looks_closed": report.looks_closed,
+        "kernels": report.kernels,
         "not_found": report.not_found,
     }
     if report.all_findings:

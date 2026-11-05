@@ -29,7 +29,8 @@ CREATE TABLE runs (
     repo_ok INTEGER NOT NULL,
     aur_ok INTEGER NOT NULL,
     yoklama_ok INTEGER NOT NULL,
-    warnings TEXT NOT NULL
+    warnings TEXT NOT NULL,
+    kernel_ok INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE findings (
     id INTEGER PRIMARY KEY,
@@ -67,7 +68,11 @@ CREATE TABLE aur_state (
 MIGRATE_1_TO_2 = "ALTER TABLE aur_state ADD COLUMN co_maintainers TEXT;"
 
 # Each entry brings a database of that version up to the next one.
-MIGRATIONS = {1: MIGRATE_1_TO_2, 2: ENRICHMENT_TABLES}
+MIGRATIONS = {
+    1: MIGRATE_1_TO_2,
+    2: ENRICHMENT_TABLES
+    + "ALTER TABLE runs ADD COLUMN kernel_ok INTEGER NOT NULL DEFAULT 1;",
+}
 
 
 @dataclass
@@ -145,17 +150,19 @@ class Store:
         repo_ok: bool,
         aur_ok: bool,
         yoklama_ok: bool,
+        kernel_ok: bool,
         warnings: list[str],
     ) -> int:
         cursor = self.db.execute(
             "INSERT INTO runs (started_at, finished_at, repo_ok, aur_ok, yoklama_ok,"
-            " warnings) VALUES (?, ?, ?, ?, ?, ?)",
+            " kernel_ok, warnings) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 started_at,
                 finished_at,
                 repo_ok,
                 aur_ok,
                 yoklama_ok,
+                kernel_ok,
                 json.dumps(warnings),
             ),
         )

@@ -11,5 +11,7 @@ python3 -B -m unittest discover -s tests    # tests, no network
 ```
 
 Besides the Arch tracker and the AUR it reads CVE records from cvelistV5, EPSS scores
-and the CISA KEV catalog. Needs `arch-audit`, `pactree` (pacman-contrib) and `yoklama`. State is kept in
+and the CISA KEV catalog. For the kernels it keeps a shallow checkout of the kernel
+CNA's records (about 280 MB, beside the database) and reads kernel.org's release list.
+Needs `arch-audit`, `pactree` (pacman-contrib), `git` and `yoklama`. State is kept in
 `~/.local/state/sicil/sicil.db`.
