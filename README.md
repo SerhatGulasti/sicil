@@ -10,5 +10,6 @@ bin/sicil report [--all] [--json]           # show the findings, no network
 python3 -B -m unittest discover -s tests    # tests, no network
 ```
 
-Needs `arch-audit`, `pactree` (pacman-contrib) and `yoklama`. State is kept in
+Besides the Arch tracker and the AUR it reads CVE records from cvelistV5, EPSS scores
+and the CISA KEV catalog. Needs `arch-audit`, `pactree` (pacman-contrib) and `yoklama`. State is kept in
 `~/.local/state/sicil/sicil.db`.

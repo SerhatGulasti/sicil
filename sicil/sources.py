@@ -1,7 +1,11 @@
 """Everything Sicil reads from outside its own database."""
 
+import csv
+import gzip
 import http.client
+import io
 import json
+import re
 import subprocess
 import tempfile
 import urllib.error
@@ -12,6 +16,16 @@ from dataclasses import dataclass
 # all.json answers with a redirect to this address.
 TRACKER_URL = "https://security.archlinux.org/issues/all.json"
 AUR_INFO_URL = "https://aur.archlinux.org/rpc/v5/info"
+CVE_RECORD_URL = (
+    "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves"
+    "/{year}/{bucket}xxx/{cve}.json"
+)
+# cisa.gov refuses automated clients; this is CISA's own copy of the catalog.
+KEV_URL = (
+    "https://raw.githubusercontent.com/cisagov/kev-data/develop/"
+    "known_exploited_vulnerabilities.json"
+)
+EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
 USER_AGENT = "sicil/0.1"
 NETWORK_TIMEOUT = 30
 COMMAND_TIMEOUT = 60
@@ -19,6 +33,10 @@ COMMAND_TIMEOUT = 60
 
 class SourceError(Exception):
     """A source could not be read; the strip that needs it is skipped this run."""
+
+
+class NotFound(SourceError):
+    """The server answered, and has no such thing."""
 
 
 @dataclass(frozen=True)
@@ -63,6 +81,9 @@ def _fetch(request: urllib.request.Request) -> bytes:
     try:
         with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT) as response:
             return response.read()
+    except urllib.error.HTTPError as e:
+        kind = NotFound if e.code == 404 else SourceError
+        raise kind(f"{request.full_url}: {e}") from e
     except (OSError, http.client.HTTPException) as e:
         # URLError and timeouts are both OSError.
         raise SourceError(f"{request.full_url}: {e}") from e
@@ -118,6 +139,37 @@ def parse_aur_info(body: bytes) -> dict[str, dict]:
         return {result["Name"]: result for result in data["results"]}
     except (KeyError, TypeError) as e:
         raise SourceError(f"AUR RPC: unexpected JSON: {e!r}") from e
+
+
+def cve_record_url(cve: str) -> str:
+    match = re.fullmatch(r"CVE-(\d{4})-(\d{4,})", cve)
+    if match is None:
+        raise SourceError(f"not a CVE id: {cve!r}")
+    year, number = match.groups()
+    return CVE_RECORD_URL.format(year=year, bucket=int(number) // 1000, cve=cve)
+
+
+def parse_kev(body: bytes) -> frozenset[str]:
+    data = _json(body, "KEV")
+    try:
+        return frozenset(entry["cveID"] for entry in data["vulnerabilities"])
+    except (KeyError, TypeError) as e:
+        raise SourceError(f"KEV: unexpected JSON: {e!r}") from e
+
+
+def parse_epss(body: bytes, wanted: set[str]) -> dict[str, float]:
+    """Scores for the wanted CVEs. The file starts with a comment line."""
+    try:
+        text = gzip.decompress(body).decode()
+        lines = io.StringIO(text)
+        lines.readline()
+        return {
+            row["cve"]: float(row["epss"])
+            for row in csv.DictReader(lines)
+            if row["cve"] in wanted
+        }
+    except (OSError, EOFError, ValueError, KeyError, TypeError) as e:
+        raise SourceError(f"EPSS: unexpected file: {e!r}") from e
 
 
 def parse_yoklama(default_report: dict, full_report: dict) -> YoklamaView:
@@ -190,6 +242,24 @@ class Sources:
             headers={"User-Agent": USER_AGENT},
         )
         return parse_aur_info(_fetch(request))
+
+    def _get(self, url: str) -> bytes:
+        return _fetch(urllib.request.Request(url, headers={"User-Agent": USER_AGENT}))
+
+    def cve_record(self, cve: str) -> str | None:
+        """The record's JSON text, or None if cvelistV5 has no such CVE."""
+        try:
+            return self._get(cve_record_url(cve)).decode()
+        except NotFound:
+            return None
+        except UnicodeDecodeError as e:
+            raise SourceError(f"{cve}: {e}") from e
+
+    def kev(self) -> frozenset[str]:
+        return parse_kev(self._get(KEV_URL))
+
+    def epss(self, wanted: set[str]) -> dict[str, float]:
+        return parse_epss(self._get(EPSS_URL), wanted)
 
     def notify(self, title: str, body: str) -> None:
         _run(["notify-send", "--app-name=Sicil", "--urgency=critical", title, body])

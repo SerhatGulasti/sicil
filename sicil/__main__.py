@@ -22,6 +22,7 @@ def format_result(result: RunResult) -> str:
         f" aur {status(result.aur_ok)}, yoklama {status(result.yoklama_ok)}",
         f"open: {count(rules.RED)} red, {count(rules.YELLOW)} yellow,"
         f" {count(rules.UNVERIFIED)} unverified,"
+        f" {count(rules.LOOKS_CLOSED)} looks closed,"
         f" {count(rules.NOT_FOUND)} not in AUR;"
         f" {result.removal_suggestions} removal suggestions",
     ]

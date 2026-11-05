@@ -3,7 +3,7 @@
 import time
 from dataclasses import dataclass, field
 
-from . import rules
+from . import enrich, rules
 from .rules import AUR, REPO, Finding
 from .sources import SourceError, Sources, YoklamaView
 from .store import Diff, Store
@@ -22,9 +22,13 @@ class RunResult:
     notified: int = 0
 
 
-def _gather_repo(sources: Sources) -> list[Finding]:
+def _gather_repo(
+    sources: Sources, store: Store, now: int, warnings: list[str]
+) -> tuple[list[Finding], enrich.Gathered]:
     advisories = sources.advisories(sources.installed())
-    return rules.classify_repo(advisories, sources.vercmp)
+    gathered = enrich.gather(sources, store, advisories, now, warnings)
+    findings = rules.classify_repo(advisories, sources.vercmp, gathered.enrichment)
+    return findings, gathered
 
 
 def _gather_aur(sources: Sources, store: Store):
@@ -81,9 +85,9 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
 
     # The network is read before the transaction, so no lock is held during it. A
     # strip that fails keeps its previous state: nothing of it is closed or changed.
-    repo_findings = aur_names = aur_findings = aur_states = None
+    repo_findings = gathered = aur_names = aur_findings = aur_states = None
     try:
-        repo_findings = _gather_repo(sources)
+        repo_findings, gathered = _gather_repo(sources, store, started, warnings)
     except SourceError as e:
         warnings.append(f"this run is incomplete: repo strip skipped: {e}")
     try:
@@ -110,6 +114,10 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
         diff = Diff()
         if repo_findings is not None:
             _merge(diff, store.sync_strip(REPO, repo_findings, run_id, now))
+            for cve, raw in gathered.records:
+                store.put_cve(cve, raw, now)
+            for key, value in gathered.meta.items():
+                store.put_meta(key, value)
         if aur_findings is not None:
             merged = rules.carry_events(
                 aur_findings, store.open_aur_events(), aur_names, now

@@ -7,7 +7,19 @@ from dataclasses import dataclass, field
 
 from .rules import AUR, EVENT_KEYS, AurState, Finding, OpenEvent
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+ENRICHMENT_TABLES = """
+CREATE TABLE cve_cache (
+    cve TEXT PRIMARY KEY,
+    raw TEXT,
+    fetched_at INTEGER NOT NULL
+);
+CREATE TABLE enrich_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
 
 SCHEMA = """
 CREATE TABLE runs (
@@ -48,11 +60,14 @@ CREATE TABLE aur_state (
     last_modified INTEGER,
     co_maintainers TEXT
 );
-"""
+""" + ENRICHMENT_TABLES
 
 # Existing rows keep NULL: the current co-maintainers become the baseline on the next
 # run, rather than all being reported as newly added.
 MIGRATE_1_TO_2 = "ALTER TABLE aur_state ADD COLUMN co_maintainers TEXT;"
+
+# Each entry brings a database of that version up to the next one.
+MIGRATIONS = {1: MIGRATE_1_TO_2, 2: ENRICHMENT_TABLES}
 
 
 @dataclass
@@ -79,11 +94,38 @@ class Store:
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA foreign_keys = ON")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        steps = {0: SCHEMA, 1: MIGRATE_1_TO_2}.get(version)
-        if steps is not None:
+        if version == 0:
+            steps = SCHEMA
+        else:
+            steps = "".join(MIGRATIONS[v] for v in range(version, SCHEMA_VERSION))
+        if version != SCHEMA_VERSION:
             self.db.executescript(
                 f"BEGIN; {steps} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
             )
+
+    def cached_cves(self, cves: list[str]) -> dict[str, tuple[str | None, int]]:
+        marks = ",".join("?" for _ in cves)
+        rows = self.db.execute(
+            f"SELECT cve, raw, fetched_at FROM cve_cache WHERE cve IN ({marks})", cves
+        ).fetchall()
+        return {cve: (raw, fetched_at) for cve, raw, fetched_at in rows}
+
+    def put_cve(self, cve: str, raw: str | None, now: int) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO cve_cache (cve, raw, fetched_at) VALUES (?, ?, ?)",
+            (cve, raw, now),
+        )
+
+    def meta(self, key: str) -> str | None:
+        row = self.db.execute(
+            "SELECT value FROM enrich_meta WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def put_meta(self, key: str, value: str) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO enrich_meta (key, value) VALUES (?, ?)", (key, value)
+        )
 
     def close(self) -> None:
         self.db.close()
