@@ -191,6 +191,9 @@ class Sources:
         )
         return parse_aur_info(_fetch(request))
 
+    def notify(self, title: str, body: str) -> None:
+        _run(["notify-send", "--app-name=Sicil", "--urgency=critical", title, body])
+
     def yoklama(self) -> YoklamaView:
         base = ["yoklama", "report", "--all", "--json"]
         return parse_yoklama(

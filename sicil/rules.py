@@ -23,6 +23,8 @@ RED_SEVERITIES = {"High", "Critical"}
 EVENT_KEYS = {"maintainer_changed", "removed", "co_maintainer_added"}
 EVENT_WINDOW_SECONDS = 7 * 86400
 
+MAX_PACKAGES_NOTIFIED = 5
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -194,6 +196,19 @@ def carry_events(
     removed = {f.package for f in carried if f.key == "removed"}
     kept = [f for f in findings if not (f.key == "not_found" and f.package in removed)]
     return kept + carried
+
+
+def notification(reds: list[tuple[str, str]]) -> tuple[str, str]:
+    """Title and body for (package, key) pairs: always one notification."""
+    if len(reds) == 1:
+        package, key = reds[0]
+        return "Sicil: new red finding", f"{package}: {key}\nSee: sicil report"
+    packages = sorted({package for package, _ in reds})
+    shown = ", ".join(packages[:MAX_PACKAGES_NOTIFIED])
+    extra = len(packages) - MAX_PACKAGES_NOTIFIED
+    if extra > 0:
+        shown += f" +{extra} more"
+    return f"Sicil: {len(reds)} new red findings", f"{shown}\nSee: sicil report"
 
 
 def suggests_removal(

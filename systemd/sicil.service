@@ -1,0 +1,14 @@
+[Unit]
+Description=Sicil package security check
+
+[Service]
+Type=oneshot
+# network-online.target does not exist in the user manager, so wait here. The leading
+# "-" runs Sicil anyway after the wait: it then records an incomplete run with a
+# warning, which a report can show, instead of leaving no trace.
+ExecStartPre=-/usr/bin/nm-online --quiet --timeout=120
+ExecStart=%h/.daemons/sicil/bin/sicil run
+TimeoutStartSec=5min
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes

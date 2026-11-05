@@ -19,6 +19,7 @@ class RunResult:
     diff: Diff
     levels: dict[str, int] = field(default_factory=dict)
     removal_suggestions: int = 0
+    notified: int = 0
 
 
 def _gather_repo(sources: Sources) -> list[Finding]:
@@ -123,6 +124,19 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
         for finding in store.open_findings():
             levels[finding.level] = levels.get(finding.level, 0) + 1
 
+    # Only after the commit: these findings are no longer new, so they alert once,
+    # and a run that failed to record alerts nobody.
+    reds = _new_reds(diff)
+    notified = 0
+    if reds:
+        try:
+            sources.notify(*rules.notification(reds))
+            notified = len(reds)
+        except SourceError as e:
+            warnings.append(f"could not send the notification: {e}")
+            with store:
+                store.set_run_warnings(run_id, warnings)
+
     return RunResult(
         run_id,
         repo_findings is not None,
@@ -132,7 +146,17 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
         diff,
         levels,
         suggestions,
+        notified,
     )
+
+
+def _new_reds(diff: Diff) -> list[tuple[str, str]]:
+    """Findings that became red in this run, whether newly opened or raised."""
+    opened = [(package, key) for package, key, level in diff.new if level == rules.RED]
+    raised = [
+        (package, key) for package, key, _, level in diff.changed if level == rules.RED
+    ]
+    return opened + raised
 
 
 def _merge(into: Diff, other: Diff) -> None:

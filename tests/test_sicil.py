@@ -306,6 +306,11 @@ class FakeSources:
         }
         self.view = YoklamaView(0.2, frozenset(), {"pam": 7}, ("too early",))
         self.fail = set()
+        self.sent = []
+
+    def notify(self, title, body):
+        self._maybe_fail("notify")
+        self.sent.append((title, body))
 
     def _maybe_fail(self, name):
         if name in self.fail:
@@ -611,6 +616,84 @@ class Runs(RunCase):
         self.run_once()
         self.assertEqual(self.open_aur(), [])
         self.assertEqual(self.store.aur_state()["foo"].co_maintainers, ("bob",))
+
+
+class Notifications(RunCase):
+    def test_new_red_alerts_once(self):
+        self.assertEqual(self.run_once().notified, 1)
+        self.assertEqual(self.run_once().notified, 0)
+        self.assertEqual(len(self.fake.sent), 1)
+        title, body = self.fake.sent[0]
+        self.assertIn("new red finding", title)
+        self.assertIn("pam: AVG-1", body)
+
+    def test_several_reds_make_one_summary(self):
+        self.fake.adv = [
+            advisory(package=f"pkg{i}", avg=f"AVG-{i}") for i in range(7)
+        ]
+        self.fake.chains.update({f"pkg{i}": frozenset() for i in range(7)})
+        self.assertEqual(self.run_once().notified, 7)
+        self.assertEqual(len(self.fake.sent), 1)
+        title, body = self.fake.sent[0]
+        self.assertIn("7 new red findings", title)
+        self.assertIn("+2 more", body)
+
+    def test_yellow_and_unverified_do_not_alert(self):
+        self.fake.adv = [
+            advisory(severity="Low"),
+            advisory(avg="AVG-2", installed="2.0-1", affected="1.0-1"),
+        ]
+        self.fake.info = {"foo": aur("foo", None)}
+        self.assertEqual(self.run_once().notified, 0)
+        self.assertEqual(self.fake.sent, [])
+
+    def test_raised_to_red_alerts(self):
+        self.fake.adv = [advisory(severity="Low")]
+        self.run_once()
+        self.fake.adv = [advisory(severity="High")]
+        self.assertEqual(self.run_once().notified, 1)
+
+    def test_aur_event_alerts_on_its_first_day_only(self):
+        self.fake.adv = []
+        self.run_once()
+        self.fake.info = {"foo": aur("foo", "mallory")}
+        self.assertEqual(self.run_once().notified, 1)
+        self.now += 86400
+        self.assertEqual(self.run_once().notified, 0)
+        self.assertEqual(len(self.fake.sent), 1)
+
+    def test_outage_does_not_alert_again(self):
+        self.run_once()
+        self.fake.fail = {"repo", "aur"}
+        self.run_once()
+        self.fake.fail = set()
+        self.assertEqual(self.run_once().notified, 0)
+        self.assertEqual(len(self.fake.sent), 1)
+
+    def test_failed_notification_is_a_recorded_warning(self):
+        self.fake.fail = {"notify"}
+        result = self.run_once()
+        self.assertEqual(result.notified, 0)
+        warnings = json.loads(self.rows("SELECT warnings FROM runs")[0][0])
+        self.assertTrue(any("notification" in w for w in warnings))
+        self.assertEqual(len(self.store.open_findings()), 1)
+
+    def test_run_that_failed_to_record_does_not_alert(self):
+        with mock.patch.object(
+            self.store, "replace_aur_state", side_effect=sqlite3.OperationalError("x")
+        ):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.run_once()
+        self.assertEqual(self.fake.sent, [])
+
+    def test_real_command_line(self):
+        result = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch("subprocess.run", return_value=result) as run:
+            sources.Sources().notify("title", "body")
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "notify-send")
+        self.assertIn("--urgency=critical", command)
+        self.assertEqual(command[-2:], ["title", "body"])
 
 
 class Reports(RunCase):

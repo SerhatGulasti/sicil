@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Sicil once a day
+
+[Timer]
+OnCalendar=*-*-* 10:00:00
+RandomizedDelaySec=15min
+# A run missed while the computer was off happens at the next start.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

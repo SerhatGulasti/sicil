@@ -33,6 +33,8 @@ def format_result(result: RunResult) -> str:
         if rows:
             lines.append(f"{title} ({len(rows)}):")
             lines.extend("  " + " ".join(str(part) for part in row) for row in rows)
+    if result.notified:
+        lines.append(f"notified about {result.notified} new red findings")
     if result.warnings:
         lines.append("warnings:")
         lines.extend(f"  {warning}" for warning in result.warnings)
