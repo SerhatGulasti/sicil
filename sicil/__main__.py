@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 
+from . import report as report_module
 from . import rules
 from .run import RunResult, execute
 from .sources import Sources
@@ -53,6 +54,21 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def report(args: argparse.Namespace) -> int:
+    try:
+        loaded = report_module.load(args.db, all_findings=args.all)
+    except report_module.ReportError as e:
+        print(f"sicil: {e}", file=sys.stderr)
+        return 1
+    formatter = report_module.format_json if args.json else report_module.format_text
+    try:
+        print(formatter(loaded))
+    except BrokenPipeError:
+        # The reader closed the pipe, as `sicil report | head` does.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sicil")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -61,6 +77,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     run_parser.add_argument("--db", default=DEFAULT_DB, help="database path")
     run_parser.set_defaults(func=run)
+
+    report_parser = commands.add_parser(
+        "report", help="show the recorded findings, without touching the network"
+    )
+    report_parser.add_argument(
+        "--all", action="store_true", help="include closed findings"
+    )
+    report_parser.add_argument("--json", action="store_true", help="print JSON")
+    report_parser.add_argument("--db", default=DEFAULT_DB, help="database path")
+    report_parser.set_defaults(func=report)
+
     args = parser.parse_args(argv)
     return args.func(args)
 

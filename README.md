@@ -6,6 +6,7 @@ reads and reports: it never installs or removes anything, and it needs no root.
 
 ```sh
 bin/sicil run                               # check the sources, record what changed
+bin/sicil report [--all] [--json]           # show the findings, no network
 python3 -B -m unittest discover -s tests    # tests, no network
 ```
 

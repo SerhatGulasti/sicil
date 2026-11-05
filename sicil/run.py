@@ -28,7 +28,10 @@ def _gather_repo(sources: Sources) -> list[Finding]:
 
 def _gather_aur(sources: Sources, store: Store):
     names = sources.foreign_packages()
-    return rules.classify_aur(names, sources.aur_info(names), store.aur_state())
+    findings, states = rules.classify_aur(
+        names, sources.aur_info(names), store.aur_state()
+    )
+    return names, findings, states
 
 
 def _annotate(
@@ -77,13 +80,13 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
 
     # The network is read before the transaction, so no lock is held during it. A
     # strip that fails keeps its previous state: nothing of it is closed or changed.
-    repo_findings = aur_findings = aur_states = None
+    repo_findings = aur_names = aur_findings = aur_states = None
     try:
         repo_findings = _gather_repo(sources)
     except SourceError as e:
         warnings.append(f"this run is incomplete: repo strip skipped: {e}")
     try:
-        aur_findings, aur_states = _gather_aur(sources, store)
+        aur_names, aur_findings, aur_states = _gather_aur(sources, store)
     except SourceError as e:
         warnings.append(f"this run is incomplete: AUR strip skipped: {e}")
     view = None
@@ -107,7 +110,11 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
         if repo_findings is not None:
             _merge(diff, store.sync_strip(REPO, repo_findings, run_id, now))
         if aur_findings is not None:
-            _merge(diff, store.sync_strip(AUR, aur_findings, run_id, now))
+            merged = rules.carry_events(
+                aur_findings, store.open_aur_events(), aur_names, now
+            )
+            renew = rules.fresh_events(aur_findings)
+            _merge(diff, store.sync_strip(AUR, merged, run_id, now, renew))
             store.replace_aur_state(aur_states)
         suggestions = _annotate(store, sources, view, warnings)
         store.set_run_warnings(run_id, warnings)

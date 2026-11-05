@@ -18,6 +18,11 @@ OBSERVATION_DAYS = 60
 
 RED_SEVERITIES = {"High", "Critical"}
 
+# Signals that fire once, in the run that notices the change, rather than describing
+# a lasting state. They stay open this long so a report read later still shows them.
+EVENT_KEYS = {"maintainer_changed", "removed", "co_maintainer_added"}
+EVENT_WINDOW_SECONDS = 7 * 86400
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -29,6 +34,15 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class OpenEvent:
+    package: str
+    key: str
+    level: str
+    detail: dict
+    first_seen: int
+
+
+@dataclass(frozen=True)
 class AurState:
     name: str
     maintainer: str | None
@@ -37,6 +51,8 @@ class AurState:
     version: str | None = None
     out_of_date: int | None = None
     last_modified: int | None = None
+    # None: not known yet, as after a migration. Empty: known to have none.
+    co_maintainers: tuple[str, ...] | None = None
 
 
 def repo_level(advisory: Advisory, vercmp: Callable[[str, str], int]) -> str:
@@ -98,14 +114,16 @@ def classify_aur(
                     before.maintainer if before else None,
                     found=False,
                     ever_found=bool(before and before.ever_found),
+                    co_maintainers=before.co_maintainers if before else None,
                 )
             )
             continue
 
         maintainer = result.get("Maintainer")
         out_of_date = result.get("OutOfDate")
+        co_maintainers = tuple(sorted(result.get("CoMaintainers") or []))
         # Losing a maintainer is the orphan signal below. Gaining a different one,
-        # adoption of an orphan included, is the takeover this rule looks for.
+        # by a handover or by adopting an orphan, is the takeover this rule looks for.
         if (
             before
             and before.ever_found
@@ -121,6 +139,18 @@ def classify_aur(
                     {"from": before.maintainer, "to": maintainer},
                 )
             )
+        if before and before.co_maintainers is not None:
+            added = set(co_maintainers) - set(before.co_maintainers)
+            if added:
+                findings.append(
+                    Finding(
+                        AUR,
+                        name,
+                        "co_maintainer_added",
+                        YELLOW,
+                        {"added": sorted(added)},
+                    )
+                )
         if maintainer is None:
             findings.append(Finding(AUR, name, "orphan", YELLOW, {}))
         if out_of_date:
@@ -136,9 +166,34 @@ def classify_aur(
                 version=result.get("Version"),
                 out_of_date=out_of_date,
                 last_modified=result.get("LastModified"),
+                co_maintainers=co_maintainers,
             )
         )
     return findings, states
+
+
+def fresh_events(findings: list[Finding]) -> set[tuple[str, str]]:
+    """The events this run noticed. classify_aur only emits one when it happens."""
+    return {(f.package, f.key) for f in findings if f.key in EVENT_KEYS}
+
+
+def carry_events(
+    findings: list[Finding], events: list[OpenEvent], names: list[str], now: int
+) -> list[Finding]:
+    """Keep earlier events open for their window, while the package is installed."""
+    current = {(f.package, f.key) for f in findings}
+    installed = set(names)
+    carried = [
+        Finding(AUR, e.package, e.key, e.level, e.detail)
+        for e in events
+        if (e.package, e.key) not in current
+        and e.package in installed
+        and now - e.first_seen < EVENT_WINDOW_SECONDS
+    ]
+    # A package shown as just removed is not also listed as never found.
+    removed = {f.package for f in carried if f.key == "removed"}
+    kept = [f for f in findings if not (f.key == "not_found" and f.package in removed)]
+    return kept + carried
 
 
 def suggests_removal(

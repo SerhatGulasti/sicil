@@ -5,9 +5,9 @@ import os
 import sqlite3
 from dataclasses import dataclass, field
 
-from .rules import AurState, Finding
+from .rules import AUR, EVENT_KEYS, AurState, Finding, OpenEvent
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE runs (
@@ -45,9 +45,14 @@ CREATE TABLE aur_state (
     ever_found INTEGER NOT NULL,
     version TEXT,
     out_of_date INTEGER,
-    last_modified INTEGER
+    last_modified INTEGER,
+    co_maintainers TEXT
 );
 """
+
+# Existing rows keep NULL: the current co-maintainers become the baseline on the next
+# run, rather than all being reported as newly added.
+MIGRATE_1_TO_2 = "ALTER TABLE aur_state ADD COLUMN co_maintainers TEXT;"
 
 
 @dataclass
@@ -73,11 +78,12 @@ class Store:
             os.makedirs(parent, exist_ok=True)
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA foreign_keys = ON")
-        if self.db.execute("PRAGMA user_version").fetchone()[0] == 0:
-            with self.db:
-                self.db.executescript(
-                    f"BEGIN; {SCHEMA} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
-                )
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        steps = {0: SCHEMA, 1: MIGRATE_1_TO_2}.get(version)
+        if steps is not None:
+            self.db.executescript(
+                f"BEGIN; {steps} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+            )
 
     def close(self) -> None:
         self.db.close()
@@ -118,10 +124,31 @@ class Store:
             "UPDATE runs SET warnings = ? WHERE id = ?", (json.dumps(warnings), run)
         )
 
+    def open_aur_events(self) -> list[OpenEvent]:
+        marks = ",".join("?" for _ in EVENT_KEYS)
+        rows = self.db.execute(
+            "SELECT package, key, level, detail, first_seen FROM findings"
+            f" WHERE strip = ? AND closed_at IS NULL AND key IN ({marks})",
+            (AUR, *sorted(EVENT_KEYS)),
+        ).fetchall()
+        return [
+            OpenEvent(package, key, level, json.loads(detail), first_seen)
+            for package, key, level, detail, first_seen in rows
+        ]
+
     def sync_strip(
-        self, strip: str, findings: list[Finding], run: int, now: int
+        self,
+        strip: str,
+        findings: list[Finding],
+        run: int,
+        now: int,
+        renew: set[tuple[str, str]] = frozenset(),
     ) -> Diff:
-        """Bring one strip's open findings in line with this run's."""
+        """Bring one strip's open findings in line with this run's.
+
+        A finding in `renew` is a new occurrence: an open one of the same kind closes
+        and a new one opens, with its own first-seen date.
+        """
         diff = Diff()
         current = {(f.package, f.key): f for f in findings}
         rows = self.db.execute(
@@ -131,15 +158,15 @@ class Store:
         ).fetchall()
         known = set()
         for row_id, package, key, level in rows:
-            known.add((package, key))
             finding = current.get((package, key))
-            if finding is None:
+            if finding is None or (package, key) in renew:
                 self.db.execute(
                     "UPDATE findings SET closed_at = ?, closed_run = ? WHERE id = ?",
                     (now, run, row_id),
                 )
                 diff.closed.append((package, key, level))
                 continue
+            known.add((package, key))
             if finding.level != level:
                 self.db.execute(
                     "UPDATE findings SET level = ?, level_run = ? WHERE id = ?",
@@ -198,11 +225,18 @@ class Store:
     def aur_state(self) -> dict[str, AurState]:
         rows = self.db.execute(
             "SELECT name, maintainer, found, ever_found, version, out_of_date,"
-            " last_modified FROM aur_state"
+            " last_modified, co_maintainers FROM aur_state"
         ).fetchall()
         return {
             row[0]: AurState(
-                row[0], row[1], bool(row[2]), bool(row[3]), row[4], row[5], row[6]
+                row[0],
+                row[1],
+                bool(row[2]),
+                bool(row[3]),
+                row[4],
+                row[5],
+                row[6],
+                None if row[7] is None else tuple(json.loads(row[7])),
             )
             for row in rows
         }
@@ -210,7 +244,9 @@ class Store:
     def replace_aur_state(self, states: list[AurState]) -> None:
         self.db.execute("DELETE FROM aur_state")
         self.db.executemany(
-            "INSERT INTO aur_state VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO aur_state (name, maintainer, found, ever_found, version,"
+            " out_of_date, last_modified, co_maintainers)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     s.name,
@@ -220,6 +256,7 @@ class Store:
                     s.version,
                     s.out_of_date,
                     s.last_modified,
+                    None if s.co_maintainers is None else json.dumps(s.co_maintainers),
                 )
                 for s in states
             ],

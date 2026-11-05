@@ -9,8 +9,8 @@ import unittest
 import urllib.error
 from unittest import mock
 
-from sicil import rules, sources
-from sicil.__main__ import format_result
+from sicil import report, rules, sources
+from sicil.__main__ import format_result, main
 from sicil.rules import AurState
 from sicil.run import execute
 from sicil.sources import (
@@ -189,6 +189,32 @@ class AurSignals(unittest.TestCase):
         found, _ = self.keys(["a"], {"a": aur("a")}, {})
         self.assertEqual(found, set())
 
+    def test_new_co_maintainer_is_yellow(self):
+        before = {"a": AurState("a", "alice", True, True, co_maintainers=("bob",))}
+        info = {"a": dict(aur("a"), CoMaintainers=["bob", "mallory"])}
+        findings, _ = rules.classify_aur(["a"], info, before)
+        self.assertEqual(
+            [(f.key, f.level, f.detail) for f in findings],
+            [("co_maintainer_added", rules.YELLOW, {"added": ["mallory"]})],
+        )
+
+    def test_co_maintainer_leaving_is_not_a_signal(self):
+        before = {"a": AurState("a", "alice", True, True, co_maintainers=("bob",))}
+        found, _ = self.keys(["a"], {"a": aur("a")}, before)
+        self.assertEqual(found, set())
+
+    def test_unknown_co_maintainers_become_the_baseline(self):
+        before = {"a": AurState("a", "alice", True, True, co_maintainers=None)}
+        info = {"a": dict(aur("a"), CoMaintainers=["bob"])}
+        found, states = self.keys(["a"], info, before)
+        self.assertEqual(found, set())
+        self.assertEqual(states["a"].co_maintainers, ("bob",))
+
+    def test_first_sight_of_co_maintainers_is_not_an_addition(self):
+        info = {"a": dict(aur("a"), CoMaintainers=["bob"])}
+        found, _ = self.keys(["a"], info, {})
+        self.assertEqual(found, set())
+
 
 class RemovalRule(unittest.TestCase):
     def suggests(self, leaves, idle, days=60):
@@ -315,7 +341,7 @@ class FakeSources:
         return self.chains[package]
 
 
-class Runs(unittest.TestCase):
+class RunCase(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
@@ -332,6 +358,8 @@ class Runs(unittest.TestCase):
     def rows(self, sql, *args):
         return self.store.db.execute(sql, args).fetchall()
 
+
+class Runs(RunCase):
     def test_first_run_opens_a_finding(self):
         result = self.run_once()
         self.assertEqual(result.diff.new, [("pam", "AVG-1", rules.RED)])
@@ -485,6 +513,252 @@ class Runs(unittest.TestCase):
         text = format_result(self.run_once())
         self.assertIn("repo FAILED", text)
         self.assertIn("incomplete", text)
+
+    def open_aur(self):
+        return sorted(
+            (f.package, f.key) for f in self.store.open_findings() if f.strip == "aur"
+        )
+
+    def days(self, count):
+        self.now += count * 86400
+
+    def test_maintainer_change_stays_open_for_seven_days(self):
+        self.run_once()
+        self.fake.info = {"foo": aur("foo", "mallory")}
+        result = self.run_once()
+        self.assertEqual(
+            [r for r in result.diff.new if r[0] == "foo"],
+            [("foo", "maintainer_changed", rules.RED)],
+        )
+        self.days(6)
+        result = self.run_once()
+        self.assertEqual(self.open_aur(), [("foo", "maintainer_changed")])
+        self.assertEqual(result.diff.new, [])  # not new again: one notification only
+        self.days(1)
+        result = self.run_once()
+        self.assertEqual(self.open_aur(), [])
+        self.assertEqual(
+            result.diff.closed, [("foo", "maintainer_changed", rules.RED)]
+        )
+
+    def test_second_change_restarts_the_window(self):
+        self.run_once()
+        self.fake.info = {"foo": aur("foo", "mallory")}
+        self.run_once()
+        self.days(6)
+        self.fake.info = {"foo": aur("foo", "eve")}
+        result = self.run_once()
+        self.assertIn(("foo", "maintainer_changed", rules.RED), result.diff.new)
+        self.assertIn(("foo", "maintainer_changed", rules.RED), result.diff.closed)
+        self.days(6)
+        self.run_once()
+        self.assertEqual(self.open_aur(), [("foo", "maintainer_changed")])
+
+    def test_removed_stays_red_then_becomes_not_found(self):
+        self.run_once()
+        self.fake.info = {}
+        self.run_once()
+        self.assertEqual(self.open_aur(), [("foo", "removed")])
+        self.days(3)
+        self.run_once()
+        self.assertEqual(self.open_aur(), [("foo", "removed")])
+        self.days(5)
+        self.run_once()
+        self.assertEqual(self.open_aur(), [("foo", "not_found")])
+
+    def test_uninstalling_closes_an_open_event(self):
+        self.run_once()
+        self.fake.info = {"foo": aur("foo", "mallory")}
+        self.run_once()
+        self.fake.names = []
+        self.fake.info = {}
+        self.run_once()
+        self.assertEqual(self.open_aur(), [])
+
+    def test_new_co_maintainer_stays_open_for_seven_days(self):
+        self.run_once()
+        self.fake.info = {"foo": dict(aur("foo"), CoMaintainers=["mallory"])}
+        self.run_once()
+        self.days(6)
+        self.run_once()
+        self.assertEqual(self.open_aur(), [("foo", "co_maintainer_added")])
+        self.days(1)
+        self.run_once()
+        self.assertEqual(self.open_aur(), [])
+
+    def test_outage_during_the_window_keeps_the_event(self):
+        self.run_once()
+        self.fake.info = {"foo": aur("foo", "mallory")}
+        self.run_once()
+        self.fake.fail = {"aur"}
+        self.days(8)
+        self.run_once()
+        self.assertEqual(self.open_aur(), [("foo", "maintainer_changed")])
+
+    def test_version_1_database_migrates_without_false_alarms(self):
+        self.fake.info = {"foo": dict(aur("foo"), CoMaintainers=["bob"])}
+        self.run_once()
+        self.store.db.executescript(
+            "ALTER TABLE aur_state DROP COLUMN co_maintainers;"
+            " PRAGMA user_version = 1;"
+        )
+        self.store.close()
+        self.store = Store(self.path)
+        self.addCleanup(self.store.close)
+        version = self.rows("PRAGMA user_version")[0][0]
+        self.assertEqual(version, 2)
+        self.assertIsNone(self.store.aur_state()["foo"].co_maintainers)
+        self.run_once()
+        self.assertEqual(self.open_aur(), [])
+        self.assertEqual(self.store.aur_state()["foo"].co_maintainers, ("bob",))
+
+
+class Reports(RunCase):
+    """Every report test reads a database written by a real run."""
+
+    def load(self, **kwargs):
+        kwargs.setdefault("now", self.now)
+        self.store.db.commit()
+        return report.load(self.path, **kwargs)
+
+    def test_sections(self):
+        self.fake.names = ["foo", "gone"]
+        self.fake.info = {"foo": aur("foo", None)}
+        self.fake.adv = [
+            advisory(package="pam", avg="AVG-1", severity="High"),
+            advisory(package="lib", avg="AVG-2", severity="Low", installed="1.0-1"),
+            advisory(
+                package="old",
+                avg="AVG-3",
+                severity="High",
+                installed="2.0-1",
+                affected="1.0-1",
+            ),
+        ]
+        self.fake.chains.update(lib=frozenset({"lib"}), gone=frozenset({"gone"}))
+        self.run_once()
+        loaded = self.load()
+        self.assertEqual([f["package"] for f in loaded.red], ["pam"])
+        self.assertEqual([f["package"] for f in loaded.yellow], ["foo", "lib"])
+        self.assertEqual([f["package"] for f in loaded.unverified], ["old"])
+        self.assertEqual([f["package"] for f in loaded.not_found], ["gone"])
+        self.assertEqual(loaded.closed, [])
+
+    def test_removal_section_has_one_row_per_package(self):
+        self.fake.adv = [
+            advisory(avg="AVG-1"),
+            advisory(avg="AVG-2", severity="Low"),
+        ]
+        self.fake.view = YoklamaView(61, frozenset({"app"}), {}, ())
+        self.run_once()
+        loaded = self.load()
+        self.assertEqual(len(loaded.removal), 1)
+        self.assertEqual(loaded.removal[0]["remove"], ["app"])
+        self.assertEqual(len(loaded.removal[0]["signals"]), 2)
+        self.assertIn("app", report.format_text(loaded))
+
+    def test_blocked_suggestion_still_shows_what_pulls_the_package(self):
+        self.run_once()
+        loaded = self.load()
+        self.assertEqual(loaded.removal, [])
+        self.assertEqual(loaded.red[0]["leaves"], ["app"])
+        self.assertIn("app", report.format_text(loaded))
+
+    def test_closed_only_with_all(self):
+        self.run_once()
+        self.fake.adv = []
+        self.run_once()
+        self.assertEqual(self.load().closed, [])
+        self.assertNotIn("Closed", report.format_text(self.load()))
+        closed = self.load(all_findings=True)
+        self.assertEqual([f["package"] for f in closed.closed], ["pam"])
+        self.assertIn("Closed", report.format_text(closed))
+        self.assertIn("closed", json.loads(report.format_json(closed)))
+        self.assertNotIn("closed", json.loads(report.format_json(self.load())))
+
+    def test_stale_run_warns_after_36_hours(self):
+        self.run_once()
+        fresh = self.load(now=self.now + 36 * 3600)
+        self.assertFalse(fresh.last_run["stale"])
+        stale = self.load(now=self.now + 36 * 3600 + 1)
+        self.assertTrue(stale.last_run["stale"])
+        self.assertIn("hours old", report.format_text(stale))
+
+    def test_yoklama_warning_and_incomplete_run_are_carried(self):
+        self.fake.fail = {"aur"}
+        self.run_once()
+        text = report.format_text(self.load())
+        self.assertIn("too early", text)
+        self.assertIn("incomplete", text)
+        self.assertIn("aur FAILED", text)
+
+    def test_long_lists_are_shortened_in_text_but_not_in_json(self):
+        cves = tuple(f"CVE-{i}" for i in range(10))
+        self.fake.adv = [advisory(cves=cves)]
+        self.run_once()
+        loaded = self.load()
+        self.assertIn("+7 more", report.format_text(loaded))
+        data = json.loads(report.format_json(loaded))
+        self.assertEqual(len(data["red"][0]["detail"]["cves"]), 10)
+
+    def test_empty_sections_say_so(self):
+        self.fake.adv = []
+        self.run_once()
+        text = report.format_text(self.load())
+        for title in ("Red: none", "Yellow: none", "Removal suggestions: none"):
+            self.assertIn(title, text)
+
+    def test_signals_are_readable(self):
+        self.run_once()
+        self.fake.adv = []
+        self.fake.info = {
+            "foo": dict(
+                aur("foo", "mallory", out_of_date=500), CoMaintainers=["eve"]
+            )
+        }
+        self.store.db.execute(
+            "UPDATE aur_state SET co_maintainers = '[]' WHERE name = 'foo'"
+        )
+        self.store.db.commit()
+        self.run_once()
+        text = report.format_text(self.load())
+        self.assertIn("maintainer alice -> mallory", text)
+        self.assertIn("new co-maintainer eve", text)
+        self.assertIn("flagged out of date", text)
+
+    def test_report_writes_nothing_and_uses_no_network_or_programs(self):
+        self.run_once()
+        self.store.db.commit()
+        before = os.stat(self.path).st_mtime_ns
+        forbidden = AssertionError("report must not leave the database")
+        with (
+            mock.patch("urllib.request.urlopen", side_effect=forbidden),
+            mock.patch("subprocess.run", side_effect=forbidden),
+            mock.patch("builtins.print"),
+        ):
+            self.assertEqual(main(["report", "--db", self.path]), 0)
+            self.assertEqual(main(["report", "--all", "--json", "--db", self.path]), 0)
+        self.assertEqual(os.stat(self.path).st_mtime_ns, before)
+
+    def test_report_cannot_write_through_its_connection(self):
+        self.run_once()
+        self.store.db.commit()
+        db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        self.addCleanup(db.close)
+        with self.assertRaises(sqlite3.OperationalError):
+            db.execute("DELETE FROM runs")
+
+    def test_missing_database_is_a_clean_error(self):
+        path = os.path.join(self.dir.name, "nothing.db")
+        with self.assertRaises(report.ReportError):
+            report.load(path)
+        self.assertFalse(os.path.exists(path))
+        with mock.patch("sys.stderr"):
+            self.assertEqual(main(["report", "--db", path]), 1)
+
+    def test_database_with_no_runs_is_a_clean_error(self):
+        with self.assertRaises(report.ReportError):
+            self.load()
 
 
 if __name__ == "__main__":
