@@ -1,7 +1,14 @@
 """Everything Sicil reads from outside its own database."""
 
+import csv
+import glob
+import gzip
 import http.client
+import io
 import json
+import os
+import re
+import shutil
 import subprocess
 import tempfile
 import urllib.error
@@ -12,13 +19,30 @@ from dataclasses import dataclass
 # all.json answers with a redirect to this address.
 TRACKER_URL = "https://security.archlinux.org/issues/all.json"
 AUR_INFO_URL = "https://aur.archlinux.org/rpc/v5/info"
+CVE_RECORD_URL = (
+    "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves"
+    "/{year}/{bucket}xxx/{cve}.json"
+)
+# cisa.gov refuses automated clients; this is CISA's own copy of the catalog.
+KEV_URL = (
+    "https://raw.githubusercontent.com/cisagov/kev-data/develop/"
+    "known_exploited_vulnerabilities.json"
+)
+EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
+KERNEL_VULNS_URL = "https://git.kernel.org/pub/scm/linux/security/vulns.git"
+KERNEL_RELEASES_URL = "https://www.kernel.org/releases.json"
 USER_AGENT = "sicil/0.1"
 NETWORK_TIMEOUT = 30
 COMMAND_TIMEOUT = 60
+GIT_TIMEOUT = 180
 
 
 class SourceError(Exception):
     """A source could not be read; the strip that needs it is skipped this run."""
+
+
+class NotFound(SourceError):
+    """The server answered, and has no such thing."""
 
 
 @dataclass(frozen=True)
@@ -42,10 +66,24 @@ class YoklamaView:
     warnings: tuple[str, ...]
 
 
-def _run(command: list[str], empty_ok: bool = False) -> str:
+@dataclass(frozen=True)
+class KernelRelease:
+    version: str
+    eol: bool
+
+
+@dataclass(frozen=True)
+class KernelRecord:
+    cve: str
+    rows: tuple[dict, ...]
+
+
+def _run(
+    command: list[str], empty_ok: bool = False, timeout: int = COMMAND_TIMEOUT
+) -> str:
     try:
         result = subprocess.run(
-            command, capture_output=True, text=True, timeout=COMMAND_TIMEOUT
+            command, capture_output=True, text=True, timeout=timeout
         )
     except (OSError, subprocess.SubprocessError) as e:
         raise SourceError(f"{command[0]}: {e}") from e
@@ -63,6 +101,9 @@ def _fetch(request: urllib.request.Request) -> bytes:
     try:
         with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT) as response:
             return response.read()
+    except urllib.error.HTTPError as e:
+        kind = NotFound if e.code == 404 else SourceError
+        raise kind(f"{request.full_url}: {e}") from e
     except (OSError, http.client.HTTPException) as e:
         # URLError and timeouts are both OSError.
         raise SourceError(f"{request.full_url}: {e}") from e
@@ -120,6 +161,37 @@ def parse_aur_info(body: bytes) -> dict[str, dict]:
         raise SourceError(f"AUR RPC: unexpected JSON: {e!r}") from e
 
 
+def cve_record_url(cve: str) -> str:
+    match = re.fullmatch(r"CVE-(\d{4})-(\d{4,})", cve)
+    if match is None:
+        raise SourceError(f"not a CVE id: {cve!r}")
+    year, number = match.groups()
+    return CVE_RECORD_URL.format(year=year, bucket=int(number) // 1000, cve=cve)
+
+
+def parse_kev(body: bytes) -> frozenset[str]:
+    data = _json(body, "KEV")
+    try:
+        return frozenset(entry["cveID"] for entry in data["vulnerabilities"])
+    except (KeyError, TypeError) as e:
+        raise SourceError(f"KEV: unexpected JSON: {e!r}") from e
+
+
+def parse_epss(body: bytes, wanted: set[str]) -> dict[str, float]:
+    """Scores for the wanted CVEs. The file starts with a comment line."""
+    try:
+        text = gzip.decompress(body).decode()
+        lines = io.StringIO(text)
+        lines.readline()
+        return {
+            row["cve"]: float(row["epss"])
+            for row in csv.DictReader(lines)
+            if row["cve"] in wanted
+        }
+    except (OSError, EOFError, ValueError, KeyError, TypeError) as e:
+        raise SourceError(f"EPSS: unexpected file: {e!r}") from e
+
+
 def parse_yoklama(default_report: dict, full_report: dict) -> YoklamaView:
     """Combine the two reports.
 
@@ -142,8 +214,138 @@ def parse_yoklama(default_report: dict, full_report: dict) -> YoklamaView:
         raise SourceError(f"yoklama: unexpected JSON: {e!r}") from e
 
 
+def parse_kernel_releases(body: bytes) -> dict[str, KernelRelease]:
+    """Newest release and end-of-life flag by branch, such as "6.18"."""
+    data = _json(body, "kernel releases")
+    releases: dict[str, KernelRelease] = {}
+    try:
+        for entry in data["releases"]:
+            if entry["moniker"] not in ("mainline", "stable", "longterm"):
+                continue
+            match = re.match(r"\d+\.\d+", entry["version"])
+            if match:
+                releases.setdefault(
+                    match.group(0),
+                    KernelRelease(entry["version"], bool(entry["iseol"])),
+                )
+    except (KeyError, TypeError) as e:
+        raise SourceError(f"kernel releases: unexpected JSON: {e!r}") from e
+    if not releases:
+        raise SourceError("kernel releases: no branches listed")
+    return releases
+
+
+def read_kernel_records(directory: str) -> tuple[list[KernelRecord], int]:
+    """The published records in a checkout, and how many could not be read.
+
+    Only the JSON is ever read. Nothing in the repository is run.
+    """
+    paths = glob.glob(os.path.join(directory, "cve", "published", "*", "*.json"))
+    if not paths:
+        raise SourceError("the kernel CVE list is empty")
+    records = []
+    unreadable = 0
+    for path in paths:
+        if os.path.islink(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            rows = tuple(
+                row
+                for row in data["containers"]["cna"]["affected"]
+                if (row.get("vendor") or "").lower() == "linux"
+                and (row.get("product") or "").lower() == "linux"
+            )
+            records.append(KernelRecord(data["cveMetadata"]["cveId"], rows))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            unreadable += 1
+    return records, unreadable
+
+
 class Sources:
     """The real sources. Tests replace this class, so they never touch the network."""
+
+    def __init__(
+        self, kernel_dir: str | None = None, kernel_url: str = KERNEL_VULNS_URL
+    ):
+        self.kernel_dir = kernel_dir
+        self.kernel_url = kernel_url
+
+    def _git(self, *arguments: str, directory: str | None = None) -> str:
+        command = ["git", "-c", "core.hooksPath=/dev/null"]
+        if directory:
+            command += ["-C", directory]
+        return _run(command + list(arguments), timeout=GIT_TIMEOUT)
+
+    def update_kernel_cves(self) -> None:
+        """Keep a shallow checkout of the records' JSON files, and nothing else."""
+        if not self.kernel_dir:
+            raise SourceError("no directory for the kernel CVE list")
+        if os.path.isdir(os.path.join(self.kernel_dir, ".git")):
+            here = self.kernel_dir
+            before = self._git("rev-parse", "HEAD", directory=here).strip()
+            self._git("fetch", "--quiet", "--depth", "1", "origin", "master", directory=here)
+            after = self._git("rev-parse", "FETCH_HEAD", directory=here).strip()
+            if after != before:
+                self._git("reset", "--quiet", "--hard", "FETCH_HEAD", directory=here)
+                # Without this every day's snapshot stays in .git.
+                self._git("reflog", "expire", "--expire=now", "--all", directory=here)
+                self._git("gc", "--quiet", "--prune=now", directory=here)
+            return
+        # Built aside, so an interrupted clone never looks like a finished one.
+        fresh = self.kernel_dir + ".new"
+        try:
+            shutil.rmtree(fresh, ignore_errors=True)
+            os.makedirs(os.path.dirname(fresh), exist_ok=True)
+            self._git(
+                "clone",
+                "--quiet",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--no-checkout",
+                self.kernel_url,
+                fresh,
+            )
+            self._git(
+                "sparse-checkout",
+                "set",
+                "--no-cone",
+                "/cve/published/*/*.json",
+                directory=fresh,
+            )
+            self._git("checkout", "--quiet", "master", directory=fresh)
+            os.replace(fresh, self.kernel_dir)
+        except OSError as e:
+            raise SourceError(f"kernel CVE list: {e}") from e
+
+    def kernel_records(self) -> tuple[list[KernelRecord], int]:
+        if not self.kernel_dir:
+            raise SourceError("no directory for the kernel CVE list")
+        return read_kernel_records(self.kernel_dir)
+
+    def kernel_releases(self) -> dict[str, KernelRelease]:
+        return parse_kernel_releases(self._get(KERNEL_RELEASES_URL))
+
+    def repo_version(self, package: str) -> str | None:
+        """What an upgrade would install, by pacman's own repo order.
+
+        Reads the sync database as it stands, last refreshed by `pacman -Sy`. Any failure
+        counts as no newer version, which only keeps a finding from turning yellow.
+        """
+        try:
+            output = _run(["pacman", "-Sp", "--print-format", "%n %v", package])
+        except SourceError:
+            return None
+        for line in output.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0] == package:
+                return parts[1]
+        return None
+
+    def running_kernel(self) -> str:
+        return os.uname().release
 
     def installed(self) -> dict[str, str]:
         lines = _run(["pacman", "-Q"]).splitlines()
@@ -190,6 +392,24 @@ class Sources:
             headers={"User-Agent": USER_AGENT},
         )
         return parse_aur_info(_fetch(request))
+
+    def _get(self, url: str) -> bytes:
+        return _fetch(urllib.request.Request(url, headers={"User-Agent": USER_AGENT}))
+
+    def cve_record(self, cve: str) -> str | None:
+        """The record's JSON text, or None if cvelistV5 has no such CVE."""
+        try:
+            return self._get(cve_record_url(cve)).decode()
+        except NotFound:
+            return None
+        except UnicodeDecodeError as e:
+            raise SourceError(f"{cve}: {e}") from e
+
+    def kev(self) -> frozenset[str]:
+        return parse_kev(self._get(KEV_URL))
+
+    def epss(self, wanted: set[str]) -> dict[str, float]:
+        return parse_epss(self._get(EPSS_URL), wanted)
 
     def notify(self, title: str, body: str) -> None:
         _run(["notify-send", "--app-name=Sicil", "--urgency=critical", title, body])

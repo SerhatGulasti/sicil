@@ -19,10 +19,13 @@ def format_result(result: RunResult) -> str:
     count = lambda level: result.levels.get(level, 0)
     lines = [
         f"run {result.run_id}: repo {status(result.repo_ok)},"
-        f" aur {status(result.aur_ok)}, yoklama {status(result.yoklama_ok)}",
+        f" aur {status(result.aur_ok)}, kernel {status(result.kernel_ok)},"
+        f" yoklama {status(result.yoklama_ok)}",
         f"open: {count(rules.RED)} red, {count(rules.YELLOW)} yellow,"
         f" {count(rules.UNVERIFIED)} unverified,"
-        f" {count(rules.NOT_FOUND)} not in AUR;"
+        f" {count(rules.LOOKS_CLOSED)} looks closed,"
+        f" {count(rules.NOT_FOUND)} not in AUR,"
+        f" {count(rules.INFO)} kernel notes;"
         f" {result.removal_suggestions} removal suggestions",
     ]
     for title, rows in (
@@ -45,7 +48,10 @@ def run(args: argparse.Namespace) -> int:
     try:
         store = Store(args.db)
         try:
-            result = execute(store, Sources())
+            state = os.path.dirname(os.path.abspath(args.db))
+            result = execute(
+                store, Sources(kernel_dir=os.path.join(state, "kernel-vulns"))
+            )
         finally:
             store.close()
     except (OSError, sqlite3.Error) as e:

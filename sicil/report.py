@@ -1,6 +1,7 @@
 """`sicil report`: reads the database only, never the network or the system."""
 
 import json
+import re
 import sqlite3
 import time
 import urllib.parse
@@ -9,8 +10,8 @@ from dataclasses import dataclass
 from . import rules
 
 STALE_HOURS = 36
-MAX_CVES_SHOWN = 3
 MAX_LEAVES_SHOWN = 5
+MAX_DESCRIPTION_SHOWN = 70
 
 SEVERITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
@@ -29,6 +30,8 @@ class Report:
     yellow: list[dict]
     removal: list[dict]
     unverified: list[dict]
+    looks_closed: list[dict]
+    kernels: list[dict]
     not_found: list[dict]
     closed: list[dict]
 
@@ -118,6 +121,8 @@ def load(path: str, now: int | None = None, all_findings: bool = False) -> Repor
             "repo_ok": bool(run["repo_ok"]),
             "aur_ok": bool(run["aur_ok"]),
             "yoklama_ok": bool(run["yoklama_ok"]),
+            # A database not yet migrated by `sicil run` has no such column.
+            "kernel_ok": bool(run["kernel_ok"]) if "kernel_ok" in run.keys() else True,
             "age_hours": round(age_hours, 1),
             "stale": stale,
         },
@@ -126,6 +131,8 @@ def load(path: str, now: int | None = None, all_findings: bool = False) -> Repor
         yellow=by_level(rules.YELLOW),
         removal=_removal(current),
         unverified=by_level(rules.UNVERIFIED),
+        looks_closed=by_level(rules.LOOKS_CLOSED),
+        kernels=by_level(rules.INFO),
         not_found=by_level(rules.NOT_FOUND),
         closed=sorted(
             (f for f in findings if f["closed_at"] is not None),
@@ -182,23 +189,122 @@ def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
     ]
 
 
+def _description(text: str | None) -> str:
+    """One line of someone else's text, with nothing a terminal would act on."""
+    if not text:
+        return "-"
+    clean = " ".join(re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", text).split())
+    if len(clean) > MAX_DESCRIPTION_SHOWN:
+        return clean[: MAX_DESCRIPTION_SHOWN - 3].rstrip() + "..."
+    return clean
+
+
+def _cve_cells(finding: dict, cve: str) -> dict[str, str]:
+    known = finding["detail"].get("enrichment", {}).get(cve, {})
+    cvss = known.get("cvss")
+    epss = known.get("epss")
+    version = known.get("version", "unknown")
+    return {
+        "cve": cve,
+        "cvss": f"{cvss} {known.get('cvss_source')}" if cvss is not None else "-",
+        "epss": f"{epss:.3f}" if epss is not None else "-",
+        "version": f"{version} KEV" if known.get("kev") else version,
+        "description": _description(known.get("description")),
+    }
+
+
+def _repo_table(findings: list[dict], extra: list[str], cells) -> list[str]:
+    """One row per CVE, so that every CVE shows its description."""
+    return _table(
+        ["PACKAGE", "SEVERITY", "CVE", "CVSS", "EPSS", "VERSION", *extra, "DESCRIPTION"],
+        [
+            [
+                f["package"],
+                f["detail"]["severity"],
+                row["cve"],
+                row["cvss"],
+                row["epss"],
+                row["version"],
+                *cells(f),
+                row["description"],
+            ]
+            for f in findings
+            for row in (_cve_cells(f, cve) for cve in f["detail"]["cves"])
+        ],
+    )
+
+
+def _record_table(findings: list[dict]) -> list[str]:
+    """For findings the tracker has no fix for: what the record and the system say."""
+    if not findings:
+        return []
+    return _repo_table(
+        findings,
+        ["INSTALLED", "RECORD", "LAST USED"],
+        lambda f: [
+            f["detail"]["installed"],
+            f["detail"]["affected"] or "-",
+            _date(f["last_used"]),
+        ],
+    )
+
+
+def _kernel_summary(finding: dict) -> str:
+    """One line. "Cover" rather than "open": neither the build's configuration nor its
+    own patches are known here, so a record is not proof of a hole in this kernel.
+    """
+    d = finding["detail"]
+    parts = [f"{d['version']} (running)" if d["running"] else d["version"]]
+    if d["behind"]:
+        parts.append(f"branch latest {d['latest']}, {d['behind']} behind")
+    elif d["behind"] == 0:
+        parts.append("latest in its branch")
+    if d["repo_newer"]:
+        parts.append(f"update available: {d['repo_version']}")
+    elif d["behind"] and d["repo_version"]:
+        parts.append(f"repo still has {d['repo_version']}")
+    if d["eol"]:
+        parts.append("branch is end of life")
+    count = d["covered_count"]
+    parts.append(
+        "1 record covers this version"
+        if count == 1
+        else f"{count} records cover this version"
+    )
+    if d["behind"] and d["remaining_count"] is not None:
+        fixed = d["covered_count"] - d["remaining_count"]
+        parts.append(
+            f"{d['latest']} fixes {fixed} of them, {d['remaining_count']} remain"
+        )
+    if d["kev"]:
+        parts.append(f"in KEV: {_shorten(d['kev'], MAX_LEAVES_SHOWN)}")
+    if d["reboot_pending"]:
+        parts.append(f"reboot pending: running {d['running_version']}")
+    return "; ".join(parts)
+
+
+def _kernel_table(findings: list[dict]) -> list[str]:
+    if not findings:
+        return []
+    return _table(
+        ["PACKAGE", "SUMMARY"],
+        [[f["package"], _kernel_summary(f)] for f in findings],
+    )
+
+
 def _finding_tables(findings: list[dict]) -> list[str]:
     lines: list[str] = []
     repo = [f for f in findings if f["strip"] == rules.REPO]
     aur = [f for f in findings if f["strip"] == rules.AUR]
+    lines += _kernel_table([f for f in findings if f["strip"] == rules.KERNEL])
     if repo:
-        lines += _table(
-            ["PACKAGE", "SEVERITY", "CVES", "FIXED IN", "LAST USED", "PULLED BY"],
-            [
-                [
-                    f["package"],
-                    f["detail"]["severity"],
-                    _shorten(f["detail"]["cves"], MAX_CVES_SHOWN),
-                    f["detail"]["fixed"] or "-",
-                    _date(f["last_used"]),
-                    _shorten(f["leaves"], MAX_LEAVES_SHOWN),
-                ]
-                for f in repo
+        lines += _repo_table(
+            repo,
+            ["FIXED IN", "LAST USED", "PULLED BY"],
+            lambda f: [
+                f["detail"]["fixed"] or "-",
+                _date(f["last_used"]),
+                _shorten(f["leaves"], MAX_LEAVES_SHOWN),
             ],
         )
     if aur:
@@ -228,7 +334,8 @@ def format_text(report: Report) -> str:
     finished = time.strftime("%Y-%m-%d %H:%M", time.localtime(run["finished_at"]))
     lines = [
         f"Last run: {finished} (repo {status(run['repo_ok'])},"
-        f" aur {status(run['aur_ok'])}, yoklama {status(run['yoklama_ok'])})"
+        f" aur {status(run['aur_ok'])}, kernel {status(run['kernel_ok'])},"
+        f" yoklama {status(run['yoklama_ok'])})"
     ]
     lines += [f"Warning: {warning}" for warning in report.warnings]
 
@@ -253,22 +360,15 @@ def format_text(report: Report) -> str:
     )
     lines += _section(
         "Unverified (no fix recorded, installed version is newer than the record)",
-        _table(
-            ["PACKAGE", "SEVERITY", "CVES", "INSTALLED", "RECORD", "LAST USED"],
-            [
-                [
-                    f["package"],
-                    f["detail"]["severity"],
-                    _shorten(f["detail"]["cves"], MAX_CVES_SHOWN),
-                    f["detail"]["installed"],
-                    f["detail"]["affected"],
-                    _date(f["last_used"]),
-                ]
-                for f in report.unverified
-            ],
-        )
-        if report.unverified
-        else [],
+        _record_table(report.unverified),
+    )
+    lines += _section(
+        "Looks closed (installed version is outside every CVE's affected range)",
+        _record_table(report.looks_closed),
+    )
+    lines += _section(
+        "Kernels (for information, nothing to do now)",
+        _kernel_table(report.kernels),
     )
     lines += _section(
         "Not found in AUR",
@@ -305,6 +405,8 @@ def format_json(report: Report) -> str:
         "yellow": report.yellow,
         "removal_suggestions": report.removal,
         "unverified": report.unverified,
+        "looks_closed": report.looks_closed,
+        "kernels": report.kernels,
         "not_found": report.not_found,
     }
     if report.all_findings:

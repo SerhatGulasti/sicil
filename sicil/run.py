@@ -1,10 +1,11 @@
 """One `sicil run`: read the sources, then record the result in one transaction."""
 
+import json
 import time
 from dataclasses import dataclass, field
 
-from . import rules
-from .rules import AUR, REPO, Finding
+from . import enrich, kernel, rules
+from .rules import AUR, KERNEL, REPO, Finding
 from .sources import SourceError, Sources, YoklamaView
 from .store import Diff, Store
 
@@ -15,6 +16,7 @@ class RunResult:
     repo_ok: bool
     aur_ok: bool
     yoklama_ok: bool
+    kernel_ok: bool
     warnings: list[str]
     diff: Diff
     levels: dict[str, int] = field(default_factory=dict)
@@ -22,9 +24,13 @@ class RunResult:
     notified: int = 0
 
 
-def _gather_repo(sources: Sources) -> list[Finding]:
+def _gather_repo(
+    sources: Sources, store: Store, now: int, warnings: list[str]
+) -> tuple[list[Finding], enrich.Gathered]:
     advisories = sources.advisories(sources.installed())
-    return rules.classify_repo(advisories, sources.vercmp)
+    gathered = enrich.gather(sources, store, advisories, now, warnings)
+    findings = rules.classify_repo(advisories, sources.vercmp, gathered.enrichment)
+    return findings, gathered
 
 
 def _gather_aur(sources: Sources, store: Store):
@@ -33,6 +39,34 @@ def _gather_aur(sources: Sources, store: Store):
         names, sources.aur_info(names), store.aur_state()
     )
     return names, findings, states
+
+
+def _gather_kernel(
+    sources: Sources, kev: frozenset[str], warnings: list[str]
+) -> list[Finding]:
+    installed = sources.installed()
+    present = [p for p in kernel.KERNEL_PACKAGES if p in installed]
+    if not present:
+        return []
+    try:
+        sources.update_kernel_cves()
+    except SourceError as e:
+        # An older list still says something, as long as there is one.
+        warnings.append(f"kernel CVE list not updated: {e}")
+    records, unreadable = sources.kernel_records()
+    if unreadable:
+        warnings.append(f"{unreadable} kernel CVE records could not be read")
+    return kernel.classify(
+        [
+            kernel.InstalledKernel(p, installed[p], sources.repo_version(p))
+            for p in present
+        ],
+        records,
+        sources.kernel_releases(),
+        kev,
+        sources.vercmp,
+        sources.running_kernel(),
+    )
 
 
 def _annotate(
@@ -51,6 +85,9 @@ def _annotate(
     chains: dict[str, frozenset[str] | None] = {}
     suggestions = 0
     for finding in store.open_findings():
+        # A kernel is never a removal candidate, and its use is not a package's.
+        if finding.strip == KERNEL:
+            continue
         if view is not None:
             store.set_last_used(finding.id, view.last_seen.get(finding.package))
         if finding.level not in (rules.RED, rules.YELLOW) or leaves is None:
@@ -81,15 +118,25 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
 
     # The network is read before the transaction, so no lock is held during it. A
     # strip that fails keeps its previous state: nothing of it is closed or changed.
-    repo_findings = aur_names = aur_findings = aur_states = None
+    repo_findings = gathered = aur_names = aur_findings = aur_states = None
     try:
-        repo_findings = _gather_repo(sources)
+        repo_findings, gathered = _gather_repo(sources, store, started, warnings)
     except SourceError as e:
         warnings.append(f"this run is incomplete: repo strip skipped: {e}")
     try:
         aur_names, aur_findings, aur_states = _gather_aur(sources, store)
     except SourceError as e:
         warnings.append(f"this run is incomplete: AUR strip skipped: {e}")
+    kernel_findings = None
+    try:
+        kev = (
+            gathered.enrichment.kev
+            if gathered is not None
+            else frozenset(json.loads(store.meta("kev") or "[]"))
+        )
+        kernel_findings = _gather_kernel(sources, kev, warnings)
+    except SourceError as e:
+        warnings.append(f"this run is incomplete: kernel strip skipped: {e}")
     view = None
     try:
         view = sources.yoklama()
@@ -105,11 +152,16 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
             repo_findings is not None,
             aur_findings is not None,
             view is not None,
+            kernel_findings is not None,
             [],
         )
         diff = Diff()
         if repo_findings is not None:
             _merge(diff, store.sync_strip(REPO, repo_findings, run_id, now))
+            for cve, raw in gathered.records:
+                store.put_cve(cve, raw, now)
+            for key, value in gathered.meta.items():
+                store.put_meta(key, value)
         if aur_findings is not None:
             merged = rules.carry_events(
                 aur_findings, store.open_aur_events(), aur_names, now
@@ -117,6 +169,8 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
             renew = rules.fresh_events(aur_findings)
             _merge(diff, store.sync_strip(AUR, merged, run_id, now, renew))
             store.replace_aur_state(aur_states)
+        if kernel_findings is not None:
+            _merge(diff, store.sync_strip(KERNEL, kernel_findings, run_id, now))
         suggestions = _annotate(store, sources, view, warnings)
         store.set_run_warnings(run_id, warnings)
 
@@ -142,6 +196,7 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
         repo_findings is not None,
         aur_findings is not None,
         view is not None,
+        kernel_findings is not None,
         warnings,
         diff,
         levels,

@@ -307,10 +307,29 @@ class FakeSources:
         self.view = YoklamaView(0.2, frozenset(), {"pam": 7}, ("too early",))
         self.fail = set()
         self.sent = []
+        self.records = {}
+        self.fetched = []
+        self.cve_attempts = 0
+        self.kev_set = frozenset()
+        self.epss_map = {}
 
     def notify(self, title, body):
         self._maybe_fail("notify")
         self.sent.append((title, body))
+
+    def cve_record(self, cve):
+        self.cve_attempts += 1
+        self._maybe_fail("cve")
+        self.fetched.append(cve)
+        return self.records.get(cve)
+
+    def kev(self):
+        self._maybe_fail("kev")
+        return self.kev_set
+
+    def epss(self, wanted):
+        self._maybe_fail("epss")
+        return {cve: score for cve, score in self.epss_map.items() if cve in wanted}
 
     def _maybe_fail(self, name):
         if name in self.fail:
@@ -604,14 +623,16 @@ class Runs(RunCase):
         self.fake.info = {"foo": dict(aur("foo"), CoMaintainers=["bob"])}
         self.run_once()
         self.store.db.executescript(
-            "ALTER TABLE aur_state DROP COLUMN co_maintainers;"
+            "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
+            " ALTER TABLE runs DROP COLUMN kernel_ok;"
+            " ALTER TABLE aur_state DROP COLUMN co_maintainers;"
             " PRAGMA user_version = 1;"
         )
         self.store.close()
         self.store = Store(self.path)
         self.addCleanup(self.store.close)
         version = self.rows("PRAGMA user_version")[0][0]
-        self.assertEqual(version, 2)
+        self.assertEqual(version, 3)
         self.assertIsNone(self.store.aur_state()["foo"].co_maintainers)
         self.run_once()
         self.assertEqual(self.open_aur(), [])
@@ -775,14 +796,15 @@ class Reports(RunCase):
         self.assertIn("incomplete", text)
         self.assertIn("aur FAILED", text)
 
-    def test_long_lists_are_shortened_in_text_but_not_in_json(self):
-        cves = tuple(f"CVE-{i}" for i in range(10))
-        self.fake.adv = [advisory(cves=cves)]
+    def test_long_leaf_list_is_shortened_in_text_but_not_in_json(self):
+        leaves = frozenset(f"leaf{i}" for i in range(9))
+        self.fake.leaf_set = leaves
+        self.fake.chains["pam"] = leaves
         self.run_once()
         loaded = self.load()
-        self.assertIn("+7 more", report.format_text(loaded))
+        self.assertIn("+4 more", report.format_text(loaded))
         data = json.loads(report.format_json(loaded))
-        self.assertEqual(len(data["red"][0]["detail"]["cves"]), 10)
+        self.assertEqual(len(data["red"][0]["leaves"]), 9)
 
     def test_empty_sections_say_so(self):
         self.fake.adv = []
