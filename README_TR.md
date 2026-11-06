@@ -2,20 +2,19 @@
 
 # Sicil
 
-CachyOS'ta kurulu paketlerin bilinen güvenlik sorunları olup olmadığını günde bir kez
-kontrol eden küçük bir araç. Bulduklarını, paket kullanımını kaydeden ayrı bir araç olan
-Yoklama'nın her paketi en son ne zaman kullanılmış gördüğüyle birleştirir ve sonucu neyin
-ilginizi hak ettiğine göre sıralar.
+Sicil, CachyOS'ta kurulu paketlerde bilinen güvenlik sorunu olup olmadığına günde bir kez bakan
+küçük bir araç. Bulduklarını, paket kullanımını kaydeden [Yoklama](https://github.com/SerhatGulasti/yoklama)'dan gelen son kullanım
+bilgisiyle birleştirip sonucu neye bakmaya değdiğine göre sıralar.
 
-Sicil yalnızca okur ve raporlar. Hiçbir paketi kurmaz, güncellemez veya kaldırmaz, root
-istemez, Yoklama'ya hiçbir şey yazmaz. Sicil bozulursa Yoklama etkilenmez.
+Sicil yalnız okur ve raporlar. Paket kurmaz, güncellemez, kaldırmaz. Root istemez, [Yoklama](https://github.com/SerhatGulasti/yoklama)'ya da
+hiçbir şey yazmaz. Sicil bozulursa [Yoklama](https://github.com/SerhatGulasti/yoklama) etkilenmez.
 
 ## Gereksinimler
 
-- CachyOS ya da pacman kullanan başka bir sistem; günlük çalışma için systemd
-- Python 3.10 veya üstü (yalnız standart kütüphane)
+- CachyOS ya da pacman kullanan başka bir sistem, günlük çalıştırma için systemd
+- Python 3.10 ya da üstü (yalnız standart kütüphane)
 - `arch-audit`, `git`, `pactree` (`pacman-contrib` paketinden), `notify-send`
-- Son kullanım tarihleri ve sök önerileri için `yoklama`. Yoksa çalıştırma uyarıyla sürer.
+- Son kullanım tarihleri ve sök önerileri için `yoklama`. Yoksa Sicil uyarı verip çalışmayı sürdürür.
 - Çekirdek CVE kayıtları için yaklaşık 300 MB disk
 
 ## Kurulum
@@ -28,19 +27,19 @@ systemctl --user enable --now sicil.timer
 ln -s ~/.daemons/sicil/bin/sicil ~/.local/bin/sicil    # `sicil` diye çağırmak için
 ```
 
-Zamanlayıcı her gün 10:00 civarında çalışır; `nm-online` bağlantı olduğunu söyleyince ya da
-iki dakika sonra başlar. Bilgisayar kapalıyken kaçan çalıştırma bir sonraki açılışta yapılır.
-Kullanıcı zamanlayıcıları yalnız oturum açıkken çalışır; bildirim de zaten o zaman görülebilir.
+Zamanlayıcı her gün 10.00 civarında çalışır. Servis `nm-online` bağlantıyı bildirince ya da iki
+dakika sonra başlar. Bilgisayar kapalıyken kaçan çalıştırma bir sonraki açılışta yapılır.
+Kullanıcı zamanlayıcıları yalnız oturum açıkken çalışır, bildirim de zaten ancak o zaman görülür.
 
-İlk çalıştırma yaklaşık bir dakika sürer, çünkü çekirdek CVE kayıtlarını klonlar.
+İlk çalıştırma çekirdek CVE kayıtlarını klonladığı için yaklaşık bir dakika sürer.
 
 ## Kullanım
 
 ```sh
 sicil run                # kaynakları kontrol et, değişeni kaydet
-sicil report             # açık bulguları göster; ağa çıkmaz, yalnız okur
-sicil report --all       # kapanan bulgular da
-sicil report --json      # betikler için JSON, tam listelerle
+sicil report             # açık bulguları göster (ağa çıkmaz, yalnız okur)
+sicil report --all       # kapanan bulguları da göster
+sicil report --json      # tam listelerle JSON çıktısı
 ```
 
 ```text
@@ -67,72 +66,72 @@ Kernels (for information, nothing to do now)
 Not found in AUR: none
 ```
 
-Başlık, son çalıştırma 36 saatten eskiyse ya da eksik kaldıysa uyarır ve Yoklama'nın kısa
-gözlem süresi uyarısını da taşır. Komut çıktısı İngilizcedir.
+Son çalıştırma 36 saatten eskiyse ya da eksik kaldıysa başlıkta uyarı çıkar. Yoklama'nın gözlem
+süresi kısaysa onun uyarısı da buraya gelir. Komut çıktısı İngilizce.
 
-## Bölümler ne anlama geliyor
+## Bölümlerin anlamı
 
 | Bölüm | Resmi paketler | AUR paketleri | Çekirdekler |
 | --- | --- | --- | --- |
-| Red (kırmızı) | Ciddiyet High veya Critical, ya da sürüm aralığının dışarıda bırakmadığı KEV'deki bir CVE | Maintainer el değiştirdi, sahipsiz paket sahiplenildi ya da paket AUR'dan silindi | Bu sürümü kapsayan bir CVE KEV'de |
-| Yellow (sarı) | Ciddiyet Low, Medium veya Unknown | Sahipsiz, out-of-date işaretli ya da yeni co-maintainer | Depoda daha yeni sürüm var ya da dal EOL |
-| Removal suggestions (sök önerisi) | Aşağıya bakın | Aşağıya bakın | Hiçbir zaman |
-| Unverified (doğrulanmamış) | Takip kaydında düzeltme yok ve kurulu sürüm kayıttakinden yeni | | |
-| Looks closed (kapanmış görünüyor) | Unverified gibi, ama her CVE'nin etkilenen aralığı kurulu sürümü dışarıda bırakıyor | | |
+| Red (kırmızı) | Ciddiyeti High ya da Critical olan bulgular, sürüm aralığının dışarıda bırakmadığı KEV'deki CVE'ler | Maintainer değişmiş, sahipsiz paket sahiplenilmiş ya da paket AUR'dan çıkmış | Bu sürümü kapsayan bir CVE KEV'de |
+| Yellow (sarı) | Ciddiyet Low, Medium ya da Unknown | Sahipsiz, out-of-date işaretli ya da yeni co-maintainer gelmiş | Depoda daha yeni sürüm var ya da dal EOL |
+| Removal suggestions (sök önerisi) | Aşağıda | Aşağıda | Verilmez |
+| Unverified (doğrulanmamış) | Takip kaydında düzeltme yok, kurulu sürüm de kayıttakinden yeni | | |
+| Looks closed (kapanmış görünüyor) | Doğrulanmamış gibi ama her CVE'nin etkilenen aralığı kurulu sürümü dışarıda bırakıyor | | |
 | Kernels (çekirdekler) | | | Geride olsun olmasın, şu an yapılacak bir şey yok |
-| Not found in AUR | | Sicil'in ilk baktığı andan beri AUR'da yok | |
+| Not found in AUR | | Sicil ilk baktığından beri AUR'da yok | |
 
-Yeni bir kırmızı bulgu tek masaüstü bildirimi gönderir, birden fazlaysa tek bir özet. Başka
-hiçbir şey bildirim üretmez, aynı bulgu ikinci kez bildirilmez.
+Yeni kırmızı bulgu masaüstü bildirimi gönderir, birden fazlaysa hepsi tek özette toplanır. Başka
+hiçbir şey bildirim üretmez, aynı bulgu da ikinci kez bildirilmez.
 
-Tek seferlik AUR olayları 7 gün açık kalır ve sonra kendiliğinden kapanır, böylece raporu
-sonradan okuyan da görür. Sahipsizlik gibi süren durumlar sürdükleri kadar açık kalır.
+Tek seferlik AUR olayları 7 gün açık kalıp kendiliğinden kapanır, böylece raporu sonradan okuyan da
+görür. Sahipsizlik gibi süren durumlar sürdükleri kadar açık kalır.
 
-**Doğrulanmamış neden var?** Arch takip kaydında düzeltilmiş sürüm yoksa `arch-audit` daha yeni
-bütün sürümleri de raporlar, yani eski bir kayıt hiç kapatılmamış olabilir. Sicil bunları
-alarmların dışında tutar ama göstermeye devam eder.
+Arch takip kaydında düzeltilmiş sürüm yoksa `arch-audit` daha yeni bütün sürümleri de raporlar, yani
+eski bir kayıt hiç kapatılmamış olabilir. **Doğrulanmamış** bölümü bu yüzden var. Sicil bu bulguları
+alarmların dışında tutar ama göstermeyi sürdürür.
 
-**Kapanmış görünüyor nasıl belirlenir?** Bir CVE ancak kaydında paketin kendisini adlandıran bir
-satırda makine okunur sürüm aralığı varsa, o satır listede olmayanların etkilenmediğini
-söylüyorsa ve kurulu sürüm aralığın dışındaysa kapalı sayılır. Dağıtımların satırları yok sayılır,
-serbest metin hiç ayrıştırılmaz: yanlış "kapandı" demek, hiç dememekten kötüdür.
+**Kapanmış görünüyor** kararı için üç koşul gerekir: CVE kaydında paketin kendisini adlandıran bir
+satırda makine okunur sürüm aralığı olmalı, o satır listede olmayanların etkilenmediğini söylemeli,
+kurulu sürüm de aralığın dışında kalmalı. Dağıtımların satırları yok sayılır, serbest metin hiç
+ayrıştırılmaz. Yanlış yere "kapandı" demek, hiç dememekten kötü.
 
-**Sök önerisi** ancak paketleri kaldırmak açıklı paketi gerçekten sistemden çıkaracaksa verilir.
-Sicil bağımlılık zincirini `pactree -ru` ile hiçbir paketin gerektirmediği paketlere
-(`pacman -Qqtt`) kadar yürür. Bunların hepsi Yoklama'nın ölçümüyle 60 gündür kullanılmamış
-olmalı, hiçbiri korunan ya da ölçülemez olmamalı. Aksi halde rapor yalnız paketi nelerin çektiğini
-gösterir. Yoklama 60 gün gözlem yapmadan öneri üretilmez. Doğrulanmamış ve kapanmış görünen
-bulgular ile çekirdekler hiç öneri almaz.
+**Sök önerisi** ancak paketleri kaldırmak açığı olan paketi gerçekten sistemden çıkaracaksa verilir.
+Sicil bağımlılık zincirini `pactree -ru` ile yukarı doğru izleyip hiçbir paketin gerektirmediği
+paketleri (`pacman -Qqtt`) bulur. Bunların hepsi Yoklama'nın ölçümüne göre 60 gündür kullanılmamış
+olmalı, hiçbiri korunan ya da ölçülemeyen paket olmamalı. Bu koşullar tutmazsa rapor yalnız paketi
+nelerin çektiğini gösterir. Yoklama 60 gün gözlem yapmadan öneri üretilmez. Doğrulanmamış ve kapanmış
+görünen bulgular ile çekirdekler hiç öneri almaz.
 
-**CVSS ve EPSS seviye değiştirmez.** EPSS kurulu sürümü bilmez: gerçek bir raporumuzdaki en yüksek
-değer, kurulu sürümden çok önce düzeltilmiş bir CVE'ye aitti.
+CVSS ve EPSS seviye değiştirmez. EPSS kurulu sürümü bilmez: gerçek bir rapordaki en yüksek değer,
+kurulu sürümden çok önce düzeltilmiş bir CVE'ye aitti.
 
 ## Çekirdekler
 
-Çekirdeğin CVE ekibi neredeyse her düzeltmeye kayıt açıyor. Bu yüzden dalının gerisindeki bir
-çekirdek, birbirinden ayırması zor yüzlerce kayıtla kapsanır. Sicil bu nedenle liste yerine
-çekirdek başına tek satır yazar; tam liste `--json` içindedir. Yalnız `linux-cachyos` ve
-`linux-cachyos-lts` kontrol edilir. Paket güncellenmiş ama makine eski çekirdekle çalışıyorsa
-satırda yeniden başlatma beklediği yazar.
+Çekirdeğin CVE ekibi neredeyse her düzeltmeye kayıt açar, bu yüzden dalının gerisinde kalan bir
+çekirdeği birbirinden ayırması zor yüzlerce kayıt kapsar. Sicil de liste yerine çekirdek başına tek
+satır yazar, tam liste `--json` çıktısında. Yalnız `linux-cachyos` ve `linux-cachyos-lts` kontrol
+edilir. Paket güncellendiği hâlde makine eski çekirdekle çalışıyorsa satırda yeniden başlatma
+beklediği yazar.
 
 ## Nasıl çalışır
 
-Her çalıştırma önce kaynakları okur, sonra sonucu tek işlemde kaydeder. Başarısız olan kaynak
-yalnız kendi şeridini atlatır: o şeridin önceki durumu korunur, hiçbir şeyi kapanmaz ve rapor
-çalıştırmanın eksik kaldığını söyler.
+Her çalıştırma önce kaynakları okur, sonra sonucu tek transaction'da kaydeder. Başarısız olan kaynak
+yalnız kendi şeridini (resmi paketler, AUR ya da çekirdek) atlatır: o şeridin önceki durumu korunur,
+hiçbir bulgusu kapanmaz, rapor da çalıştırmanın eksik kaldığını söyler.
 
 | Kaynak | Ne için | Ne zaman |
 | --- | --- | --- |
 | `arch-audit`, [security.archlinux.org](https://security.archlinux.org/) verisiyle | Resmi paket bulguları | Her çalıştırma |
 | [AUR RPC](https://aur.archlinux.org/rpc/) | Maintainer ve out-of-date durumu | Her çalıştırma |
-| [cvelistV5](https://github.com/CVEProject/cvelistV5) | Açıklama, CVSS, sürüm aralıkları | Yeni CVE'ler; kapanmamışlar bir hafta sonra yeniden |
+| [cvelistV5](https://github.com/CVEProject/cvelistV5) | Açıklama, CVSS, sürüm aralıkları | Yeni CVE'ler, kapanmamışlar bir hafta sonra yeniden |
 | [EPSS](https://www.first.org/epss/) | Raporda gösterilen değer | Her çalıştırma |
 | [CISA KEV](https://github.com/cisagov/kev-data) | Sömürüldüğü bilinen CVE'ler | Her çalıştırma |
 | [Çekirdek CVE kayıtları](https://git.kernel.org/pub/scm/linux/security/vulns.git) | Her çekirdeği kapsayan kayıtlar | Her çalıştırma, JSON dosyalarının sığ güncellemesi |
 | [kernel.org](https://www.kernel.org/releases.json) | Dal başına son sürüm ve EOL | Her çalıştırma |
 | `yoklama report` | Son kullanım, boştaki paketler, gözlem süresi | Her çalıştırma |
 
-Durum `~/.local/state/sicil/` altında durur: `sicil.db` ve `kernel-vulns` klasörü.
+Durum bilgisi `~/.local/state/sicil/` altında tutulur: `sicil.db` ve `kernel-vulns` klasörü.
 
 | Modül | Görevi |
 | --- | --- |
@@ -141,27 +140,27 @@ Durum `~/.local/state/sicil/` altında durur: `sicil.db` ve `kernel-vulns` klas�
 | `sicil/cve.py` | CVE kayıtlarını okuma, sürüm kararı |
 | `sicil/enrich.py` | CVE önbelleği, KEV ve EPSS |
 | `sicil/kernel.py` | Çekirdek şeridi |
-| `sicil/store.py` | SQLite depolama ve taşıma |
-| `sicil/run.py` | Bir `sicil run` |
+| `sicil/store.py` | SQLite depolama ve migration |
+| `sicil/run.py` | Bir `sicil run` çalıştırması |
 | `sicil/report.py` | `report` komutu |
 
 ## Sınırlar
 
-Rapor bir ipucudur, hüküm değil.
+Raporu ipucu olarak okuyun.
 
-- **"Kapanmış görünüyor" upstream sürümlerle ilgilidir.** CVE kaydındaki aralıklara güvenir.
-- **Birçok kayda karar verilemez.** CVE kayıtlarının birçoğunda kullanılabilir sürüm aralığı yok;
-  bunlar Doğrulanmamış kalır. Paket adı kayıttaki ürün adıyla da uyuşmayabilir.
-- **Çekirdek sayıları yalnız sürüme bakar.** CachyOS'un kendi yamaları ve çekirdeğin yapılandırması
-  hesaba katılmaz, yani kayıt derlenmemiş bir modülle ilgili olabilir. Bu yüzden rapor bir sürümde
-  o kadar açık olduğunu değil, kayıtların o sürümü "kapsadığını" söyler. Kaçırılan düzeltme
-  sayısı bir alt sınırdır, çünkü CVE'ler çoğu zaman düzeltmeden sonra açılır.
-- **"Depoda daha yeni sürüm var" son pacman eşitlemesine bakar.** Sicil root istemediği için
+- "Kapanmış görünüyor" upstream sürümlerle ilgili, CVE kaydındaki aralıklara güvenir.
+- Pek çok CVE kaydında kullanılabilir sürüm aralığı olmadığı için karar verilemez, bunlar
+  Doğrulanmamış bölümünde kalır. Paket adı da kayıttaki ürün adıyla uyuşmayabilir.
+- Çekirdek sayıları yalnız sürüme bakar. CachyOS'un kendi yamaları ve çekirdeğin yapılandırması hesaba
+  katılmaz, yani kayıt derlenmemiş bir modülle ilgili olabilir. Rapor bu yüzden sürümde o kadar açık
+  olduğunu söylemez, kayıtların sürümü "kapsadığını" söyler. CVE'ler çoğu zaman düzeltmeden sonra
+  açıldığı için kaçırılan düzeltme sayısı gerçekte daha yüksek olabilir.
+- "Depoda daha yeni sürüm var" bilgisi son pacman eşitlemesine dayanır. Sicil root istemediği için
   paket listelerini kendisi yenilemez.
-- **Yalnız CachyOS depolarında olan paketler kapsam dışıdır,** iki çekirdek hariç. Arch takip
-  listesi onları bilmez.
-- **AUR paketlerine CVE kontrolü yapılmaz.** AUR adları upstream projelerle güvenilir biçimde
-  eşleşmez, bu yüzden onlar için yalnız güvenilirlik sinyalleri toplanır.
+- İki çekirdek dışında, yalnız CachyOS depolarında bulunan paketlere bakılmaz. Arch takip listesi
+  onları bilmez.
+- AUR paketlerine CVE kontrolü yapılmaz. AUR adları upstream projelerle güvenilir biçimde eşleşmediği
+  için bu paketlerden yalnız güvenilirlik sinyalleri toplanır.
 
 ## Geliştirme
 
@@ -169,9 +168,8 @@ Rapor bir ipucudur, hüküm değil.
 python3 -B -m unittest discover -s tests
 ```
 
-Testler kaydedilmiş yanıtları ve geçici bir git deposunu kullanır, ağa hiç çıkmaz. Gerçek
-durumunuza dokunmadan denemek için `--db` kullanın. Çekirdek klasörü verdiğiniz veritabanının
-yanında tutulur.
+Testler kaydedilmiş yanıtları ve geçici bir git deposunu kullanır, ağa hiç çıkmaz. Gerçek durumunuza
+dokunmadan denemek için `--db` kullanın. Çekirdek klasörü verdiğiniz veritabanının yanında tutulur.
 
 ## Kaldırma
 
@@ -180,4 +178,4 @@ systemctl --user disable --now sicil.timer
 rm ~/.local/bin/sicil
 ```
 
-Toplanan veri `~/.local/state/sicil` altında kalır; istemiyorsanız onu da silin.
+Toplanan veri `~/.local/state/sicil` altında kalır, istemiyorsanız onu da silin.

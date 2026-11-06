@@ -3,12 +3,12 @@
 # Sicil
 
 A small tool for CachyOS that checks once a day whether the installed packages have
-known security problems. It combines what it finds with how recently Yoklama, a separate
+known security problems. It combines what it finds with how recently [Yoklama](https://github.com/SerhatGulasti/yoklama), a separate
 package usage recorder, saw each package used, and sorts the result by what is worth your
 attention.
 
 Sicil only reads and reports. It never installs, updates or removes a package, needs no
-root, and writes nothing to Yoklama. If Sicil breaks, Yoklama is not affected.
+root, and writes nothing to [Yoklama](https://github.com/SerhatGulasti/yoklama). If Sicil breaks, [Yoklama](https://github.com/SerhatGulasti/yoklama) is not affected.
 
 ## Requirements
 
