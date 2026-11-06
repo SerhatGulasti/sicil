@@ -1,0 +1,526 @@
+.\" Manual page for sicil. Keep it in step with sicil/__main__.py and README.md.
+.TH sicil 1 2026-11-06 "sicil" "User Commands"
+.SH NAME
+sicil \- check whether installed packages have known security problems
+.SH SYNOPSIS
+.B sicil
+.RB [ \-h ]
+.I command
+.PP
+.B sicil run
+.RB [ \-h ]
+.RB [ \-\-db
+.IR path ]
+.PP
+.B sicil report
+.RB [ \-h ]
+.RB [ \-\-all ]
+.RB [ \-\-json ]
+.RB [ \-\-db
+.IR path ]
+.RI [ filters ]
+.PP
+.B sicil show
+.RB [ \-h ]
+.RB [ \-f
+.IR field ]
+.RB [ \-\-db
+.IR path ]
+.I id
+.SH DESCRIPTION
+.B sicil
+checks once a day whether the packages installed on a CachyOS or other
+pacman-based system have known security problems.
+It combines what it finds with how recently
+.BR yoklama ,
+a separate package usage recorder, saw each package used,
+and sorts the result by what is worth attention.
+.PP
+.B sicil
+only reads and reports.
+It never installs, updates or removes a package, needs no root,
+and writes nothing to
+.BR yoklama .
+.PP
+Its report is a hint, not a verdict; see
+.BR CAVEATS .
+.SH COMMANDS
+.TP
+.B run
+Read the sources, record what changed in the database and print a short summary:
+whether there is a new problem, what changed, and where the kernels stand.
+This is the command the daily timer runs.
+It creates the database if there is none and upgrades an older one.
+.IP
+A source that fails skips only its own part of the check.
+The previous state of that part is kept, none of its findings are closed,
+and the report says the run was incomplete.
+A new red finding raises one desktop notification,
+a single summary if there are several;
+nothing else notifies, and the same finding does not notify twice.
+.TP
+.B report
+Print the recorded findings.
+Each row starts with an ID to use with
+.BR "sicil show" ,
+and its description sits below it.
+.IP
+The database is opened read-only and the network is not used.
+The only program it may run is
+.BR vercmp (8),
+for the version filters.
+On a terminal the output fits the width:
+descriptions are cut to one line, and a table too wide drops its least
+important columns and says which.
+In a pipe nothing is shortened.
+A column empty in every row is left out,
+and a value shared by every row moves above the table.
+.IP
+The header warns if the last run is more than 36 hours old or was incomplete,
+and carries the warning of
+.B yoklama
+about a short observation period.
+.TP
+.B show
+Print one record, judged against the version installed now.
+The full description is shown here, without the cut
+.B report
+makes on a terminal.
+See
+.BR IDS .
+.IP
+The database is opened read-only and the version comes from
+.BR \%pacman (8);
+the network is not used.
+For a kernel the record is read from the local checkout.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+Works on
+.B sicil
+and on each command;
+.B sicil \-h report
+is the same as
+.BR "sicil report \-h" .
+.TP
+.BI \-\-db " path"
+Use the database at
+.I path
+instead of
+.IR \(ti/.local/state/sicil/sicil.db .
+Accepted by every command, after the command name.
+The kernel checkout is kept beside whichever database is named,
+so this also tries a run without touching the real state.
+.SS Options of report
+.TP
+.B \-\-all
+Also show closed findings.
+.TP
+.B \-\-json
+Print JSON, with the complete lists, including every CVE covering a kernel.
+Filters apply to it too.
+The top-level keys are
+.BR generated_at ,
+.BR last_run ,
+.BR warnings ,
+.BR yoklama_found ,
+.BR red ,
+.BR yellow ,
+.BR removal_suggestions ,
+.BR unverified ,
+.BR looks_closed ,
+.B kernels
+and
+.BR not_found ;
+.B closed
+is added with
+.BR \-\-all ,
+and
+.B filtered
+with any filter.
+.SS Options of show
+.TP
+.BI \-f " field\fR, " \-\-field " field"
+Print one field bare, for scripts:
+.BR desc ,
+.BR installed ,
+.BR status ,
+.BR severity ,
+.BR cvss ,
+.BR epss ,
+.BR kev ,
+.BR range ,
+.BR record ,
+.BR fixed ,
+.B last\-used
+or
+.BR url .
+A field with no value prints an empty line and exits with 0.
+This option needs an ID with a package name.
+.SH FILTERS
+Filters narrow down
+.BR "sicil report" ,
+also with
+.BR \-\-json .
+Different filters must all match, and a repeated filter may match any of its
+values:
+.B \-p pam \-p libxml2 \-c 7
+means pam or libxml2, with CVSS 7 or above.
+.PP
+A record hidden only because the filtered field is empty does not vanish:
+the end of the report counts it per field, as in
+.BR "3 records hidden: no CVSS" .
+A filtered report says so at the top, so that
+.B Red: none
+is not read as an all-clear.
+.TP
+.BI \-p " name\fR, " \-\-package " name"
+Package name.
+Wildcards work, and the match is case-sensitive.
+Quote wildcards, or the shell may expand them:
+.BR \(aqlib*\(aq .
+.TP
+.BI \-\-cve " id"
+CVE ID, in either case.
+Wildcards work:
+.BR \(aqCVE\-2021\-*\(aq .
+On a kernel it lists the matching IDs.
+.TP
+.BI \-s " level\fR, " \-\-severity " level"
+This level and above:
+.BR low ,
+.BR medium ,
+.B high
+or
+.BR critical ,
+in either case.
+.B \-s medium
+is medium, high and critical.
+A severity of unknown matches only
+.BR "\-s unknown" ,
+so
+.B \-s low \-s unknown
+is every severity.
+.TP
+.BI \-c " score\fR, " \-\-min\-cvss " score"
+This CVSS score and above.
+The score is the one from the CNA, or else from CISA-ADP.
+.TP
+.BI \-\-unused " days"
+Not used for this many days.
+A package never seen in use counts as unused.
+A package
+.B yoklama
+cannot measure is not listed and is counted as
+.BR "no last-used date" .
+.TP
+.BI \-\-used " days"
+Used within this many days.
+A package
+.B yoklama
+cannot measure is treated as with
+.BR \-\-unused .
+.TP
+.BI \-\-installed\-min " version\fR, " \-\-installed\-max " version"
+Installed version this or newer, or this or older.
+Compared by
+.BR vercmp (8),
+not as text.
+.TP
+.BI \-\-record\-min " version\fR, " \-\-record\-max " version"
+Version in the tracker record this or newer, or this or older.
+Compared the same way.
+.TP
+.BI \-\-status " status"
+.B open
+for red or yellow,
+.B unverified
+for Can\(aqt verify,
+.B looks\-closed
+for Looks closed.
+Closed findings never match.
+.PP
+.B \-\-unused
+and
+.B \-\-used
+exit with an error rather than return an empty list when
+.B yoklama
+is not installed, when the last run got no usage data from it,
+or when
+.B sicil run
+has not yet upgraded the database.
+A kernel has no severity, CVSS or last-use date to filter on.
+.SH IDS
+An ID is
+.IB package : CVE\fR,
+such as
+.BR pam:CVE\-2025\-6020 ,
+so two machines reach the same ID without seeing each other.
+It carries no version, because
+.B sicil show
+reads the installed version when asked.
+AUR findings are events and have no ID.
+.PP
+.B sicil show
+accepts an ID or a bare CVE, which lists every package on this machine that has
+that CVE.
+A valid ID with no finding is not an error and exits with 0:
+.B show
+says the package is not installed, or that the CVE is not among the findings of
+the last run, which does not prove the package is unaffected.
+With
+.BR \-f ,
+only
+.BR installed ,
+.B status
+and
+.B url
+answer for such an ID; any other field exits with 1.
+.SH REPORT SECTIONS
+.TP
+.B Red
+Official package: severity High or Critical,
+or a CVE in KEV that the version range does not rule out.
+AUR package: the maintainer changed hands, an orphan was adopted,
+or the package left the AUR.
+Kernel: a CVE covering this version is in KEV.
+.TP
+.B Yellow
+Official package: severity Low, Medium or Unknown.
+AUR package: orphan, flagged out of date, or a new co-maintainer.
+Kernel: the repository has a newer version, or the branch is at end of life.
+.TP
+.B Removal suggestions
+Packages whose removal would really take the vulnerable package off the system.
+The dependency chain is walked up with
+.B pactree \-ru
+to the packages nothing requires
+.RB ( "pacman \-Qqtt" ).
+All of them must have gone unused for 60 days by the count of
+.BR yoklama ,
+and none may be protected or unmeasurable;
+otherwise the report only shows what pulls the package in.
+No suggestions are made until
+.B yoklama
+has observed for 60 days.
+Can\(aqt verify findings, Looks closed findings and kernels never get one.
+This section is left out without
+.BR yoklama .
+.TP
+.B Can\(aqt verify
+The Arch security tracker has no fix and the installed version is newer than
+its record.
+.BR arch\-audit (1)
+reports every newer version in that case, so an old record may simply never
+have been closed.
+.TP
+.B Looks closed
+As Can\(aqt verify, but the affected range of every CVE excludes the installed
+version.
+A CVE counts as closed only if its record has a machine-readable version range
+on a row naming the package itself, that row says everything unlisted is
+unaffected, and the installed version is outside the range.
+.TP
+.B Kernels
+One line per kernel, behind or not, with nothing to do right now.
+Only
+.B linux\-cachyos
+and
+.B linux\-cachyos\-lts
+are checked.
+If the package was upgraded but the machine still runs the old kernel,
+the line says a reboot is pending.
+.TP
+.B Not found in AUR
+Not on the AUR since the first time
+.B sicil
+looked.
+.TP
+.B Closed
+Findings no longer open; shown with
+.BR \-\-all .
+.PP
+One-off AUR events stay open for 7 days and then close by themselves.
+Lasting states such as an orphan stay open as long as they last.
+CVSS and EPSS are shown but never change a level.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+A source being down during
+.B sicil run
+is an expected state: it is reported as a warning and still exits with 0.
+.TP
+.B 1
+The database cannot be opened or used, no run is recorded yet,
+the database was written by a newer
+.BR sicil ,
+a usage filter cannot run, or
+.B sicil show \-f
+asked for a field of a record that does not exist.
+.TP
+.B 2
+Invalid usage: an unknown option or value, a malformed ID,
+or
+.B \-f
+with a bare CVE.
+.SH ENVIRONMENT
+.TP
+.B COLUMNS
+Overrides the terminal width that
+.B report
+and
+.B show
+fit.
+.TP
+.B HOME
+Locates the default database.
+.TP
+.B PATH
+Used to find the external programs, and to tell whether
+.B yoklama
+is installed.
+.SH FILES
+.TP
+.I \(ti/.local/state/sicil/sicil.db
+The SQLite database of runs and findings.
+.TP
+.I \(ti/.local/state/sicil/kernel\-vulns/
+Local checkout of the kernel CVE records, about 300 MB.
+The first run clones it, which takes about a minute.
+.TP
+.IR sicil.service ", " sicil.timer
+The systemd user units in the
+.I systemd/
+directory of the source tree.
+The timer runs around 10:00 every day, within 15 minutes;
+a run missed while the computer was off happens at the next start.
+User timers only run while the user is logged in.
+The service expects the source tree at
+.IR \(ti/.daemons/sicil .
+.SH CAVEATS
+.IP \(bu 2
+Looks closed is about upstream versions: it trusts the ranges in the CVE record.
+.IP \(bu 2
+Many CVE records carry no usable version range and stay in Can\(aqt verify.
+Their package name may not match the product named in the record either.
+.IP \(bu 2
+Kernel numbers look only at the version.
+CachyOS patches and the kernel configuration are not considered,
+so a record may concern a module that is not even built.
+The report therefore says records cover a version, not that it has that many
+holes.
+The count of fixes missed is a lower bound, since CVEs are often opened after
+the fix.
+.IP \(bu 2
+The repository having a newer version is judged by the last pacman sync, because
+.B sicil
+needs no root and does not refresh the package lists.
+.IP \(bu 2
+Packages only in the CachyOS repositories are not covered, apart from the two
+kernels; the Arch tracker does not know them.
+.IP \(bu 2
+AUR packages get no CVE check, because AUR names do not reliably match upstream
+projects.
+Only trust signals are collected for them.
+.IP \(bu 2
+.B \-\-unused
+and
+.B \-\-used
+say nothing about a package
+.B yoklama
+cannot measure, since it may be in use without being seen.
+.IP \(bu 2
+A short observation period makes last-use data weak:
+a package listed by
+.B \-\-unused
+may have no date simply because
+.B yoklama
+has not seen it yet.
+The report warns about this at the top.
+.SH EXAMPLES
+Check the sources now, then read the result:
+.PP
+.RS 4
+.EX
+sicil run
+sicil report
+.EE
+.RE
+.PP
+High and critical findings on packages whose names start with lib:
+.PP
+.RS 4
+.EX
+sicil report \-p \(aqlib*\(aq \-s high
+.EE
+.RE
+.PP
+pam or libxml2, with CVSS 7 or above:
+.PP
+.RS 4
+.EX
+sicil report \-p pam \-p libxml2 \-c 7
+.EE
+.RE
+.PP
+CVEs from 2021, as JSON:
+.PP
+.RS 4
+.EX
+sicil report \-\-cve \(aqCVE\-2021\-*\(aq \-\-json
+.EE
+.RE
+.PP
+Open problems on packages not used for 60 days:
+.PP
+.RS 4
+.EX
+sicil report \-\-unused 60 \-\-status open
+.EE
+.RE
+.PP
+Installed version 5.9 or older:
+.PP
+.RS 4
+.EX
+sicil report \-\-installed\-max 5.9
+.EE
+.RE
+.PP
+The whole report with nothing shortened:
+.PP
+.RS 4
+.EX
+sicil report | less
+.EE
+.RE
+.PP
+One record, its description alone, and every package with a CVE:
+.PP
+.RS 4
+.EX
+sicil show pam:CVE\-2025\-6020
+sicil show pam:CVE\-2025\-6020 \-f desc
+sicil show CVE\-2025\-6020
+.EE
+.RE
+.SH AUTHORS
+Serhat Gulasti.
+.SH SEE ALSO
+.BR arch\-audit (1),
+.BR notify\-send (1),
+.BR nm\-online (1),
+.BR systemctl (1),
+.BR systemd.timer (5),
+.BR pacman (8),
+.BR pactree (8),
+.BR vercmp (8)
+.PP
+The README of the source tree, for the data sources and how a run works.
+.PP
+.UR https://github.com/SerhatGulasti/yoklama
+Yoklama
+.UE ,
+the optional package usage recorder.
