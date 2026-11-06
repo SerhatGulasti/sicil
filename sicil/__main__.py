@@ -185,6 +185,11 @@ def report(args: argparse.Namespace) -> int:
                 raise report_module.ReportError(
                     "the last run got no usage data from Yoklama, this filter can't run"
                 )
+            if not loaded.knows_unmeasurable:
+                raise report_module.ReportError(
+                    "this database has no list of unmeasurable packages yet;"
+                    " `sicil run` will add it"
+                )
         loaded = report_module.apply_filters(loaded, filters, Sources().vercmp)
     except (report_module.ReportError, SourceError) as e:
         print(f"sicil: {e}", file=sys.stderr)
@@ -330,15 +335,16 @@ def _add_filters(parser: argparse.ArgumentParser) -> None:
         "--unused",
         metavar="DAYS",
         type=_at_least_zero,
-        help="not used for this many days; a package never used counts."
-        " Needs Yoklama",
+        help="not used for this many days; a package never used counts, one"
+        " Yoklama can't measure does not. Needs Yoklama",
         **many,
     )
     group.add_argument(
         "--used",
         metavar="DAYS",
         type=_at_least_zero,
-        help="used within this many days. Needs Yoklama",
+        help="used within this many days; a package Yoklama can't measure does"
+        " not count. Needs Yoklama",
         **many,
     )
     for name, what, bound in (

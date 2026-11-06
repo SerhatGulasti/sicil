@@ -92,7 +92,11 @@ def _annotate(
         if finding.strip == KERNEL:
             continue
         if view is not None:
-            store.set_last_used(finding.id, view.last_seen.get(finding.package))
+            # Yoklama may hold a date for such a package, but says it means nothing.
+            if finding.package in view.unmeasurable:
+                store.set_last_used(finding.id, None, unmeasurable=True)
+            else:
+                store.set_last_used(finding.id, view.last_seen.get(finding.package))
         if finding.level not in (rules.RED, rules.YELLOW) or leaves is None:
             store.annotate(finding.id, None, False)
             continue

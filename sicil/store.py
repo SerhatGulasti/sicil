@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from .rules import AUR, EVENT_KEYS, AurState, Finding, OpenEvent
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 ENRICHMENT_TABLES = """
 CREATE TABLE cve_cache (
@@ -47,7 +47,8 @@ CREATE TABLE findings (
     closed_run INTEGER REFERENCES runs(id),
     last_used INTEGER,
     leaves TEXT,
-    suggest_removal INTEGER NOT NULL DEFAULT 0
+    suggest_removal INTEGER NOT NULL DEFAULT 0,
+    unmeasurable INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX findings_open
     ON findings (strip, package, key) WHERE closed_at IS NULL;
@@ -72,6 +73,7 @@ MIGRATIONS = {
     1: MIGRATE_1_TO_2,
     2: ENRICHMENT_TABLES
     + "ALTER TABLE runs ADD COLUMN kernel_ok INTEGER NOT NULL DEFAULT 1;",
+    3: "ALTER TABLE findings ADD COLUMN unmeasurable INTEGER NOT NULL DEFAULT 0;",
 }
 
 
@@ -266,9 +268,12 @@ class Store:
             ),
         )
 
-    def set_last_used(self, finding_id: int, last_used: int | None) -> None:
+    def set_last_used(
+        self, finding_id: int, last_used: int | None, unmeasurable: bool = False
+    ) -> None:
         self.db.execute(
-            "UPDATE findings SET last_used = ? WHERE id = ?", (last_used, finding_id)
+            "UPDATE findings SET last_used = ?, unmeasurable = ? WHERE id = ?",
+            (last_used, unmeasurable, finding_id),
         )
 
     def aur_state(self) -> dict[str, AurState]:

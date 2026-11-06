@@ -104,7 +104,7 @@ repeated one may match any: `-p pam -p libxml2 -c 7` means "pam or libxml2, with
 | CVE | `--cve <id>` | Wildcards work: `'CVE-2021-*'`. On a kernel it lists the matching IDs |
 | Severity | `-s`, `--severity <level>` | This level and above: `-s medium` is medium, high and critical. Unknown only with `-s unknown` |
 | CVSS | `-c`, `--min-cvss <score>` | This score and above; the CNA's, or else CISA-ADP's |
-| Last use | `--unused <days>`, `--used <days>` | A package never seen in use counts as unused. Without Yoklama this is an error, not an empty list |
+| Last use | `--unused <days>`, `--used <days>` | A package never seen in use counts as unused. A package Yoklama cannot measure is not listed and is counted as `no last-used date`. Without Yoklama this is an error, not an empty list |
 | Installed version | `--installed-min`, `--installed-max` | Compared by pacman's `vercmp`, not as text |
 | Record version | `--record-min`, `--record-max` | The same |
 | Status | `--status <status>` | `open`, `unverified`, `looks-closed` |
@@ -240,8 +240,9 @@ The report is a hint, not a verdict.
   tracker does not know them.
 - **AUR packages get no CVE check.** AUR names do not reliably match upstream projects, so only
   trust signals are collected for them.
-- **`--unused` cannot tell "never used" from "cannot be measured".** Yoklama gives no last-use date
-  for either, and both count as unused.
+- **`--unused` and `--used` say nothing about a package Yoklama cannot measure.** Such a package may
+  be in use without Yoklama seeing it, so neither filter lists it. The end of the report counts it
+  as `no last-used date`.
 
 ## Development
 

@@ -61,6 +61,8 @@ class Report:
     closed: list[dict]
     # False when `yoklama` is not installed: no last-used column, no removal section.
     usage: bool = True
+    # False until `sicil run` migrates the database: --unused can't trust it yet.
+    knows_unmeasurable: bool = True
     filtered: bool = False
     shown: int = 0
     total: int = 0
@@ -80,6 +82,8 @@ def _row(row: sqlite3.Row) -> dict:
         "last_used": row["last_used"],
         "leaves": None if row["leaves"] is None else json.loads(row["leaves"]),
         "suggest_removal": bool(row["suggest_removal"]),
+        # A database not yet migrated by `sicil run` has no such column.
+        "unmeasurable": "unmeasurable" in row.keys() and bool(row["unmeasurable"]),
     }
 
 
@@ -154,6 +158,7 @@ def load(
             "SELECT * FROM findings WHERE closed_at IS NULL"
             + ("" if not all_findings else " OR closed_at IS NOT NULL")
         ).fetchall()
+        version = db.execute("PRAGMA user_version").fetchone()[0]
     except sqlite3.Error as e:
         raise ReportError(f"{path}: {e}") from e
     finally:
@@ -200,6 +205,7 @@ def load(
             key=lambda f: (-f["closed_at"], f["package"], f["key"]),
         ),
         usage=usage,
+        knows_unmeasurable=version >= 4,
     )
 
 
@@ -758,6 +764,8 @@ def _records(finding: dict) -> list[Record]:
     common = {
         "package": finding["package"],
         "last_used": finding["last_used"],
+        # A kernel's use is not a package's: Sicil records none for it.
+        "has_usage": finding["strip"] != rules.KERNEL and not finding["unmeasurable"],
         "status": _status(finding),
     }
     if finding["strip"] == rules.REPO:
@@ -773,11 +781,9 @@ def _records(finding: dict) -> list[Record]:
             for cve in detail["cves"]
         ]
     if finding["strip"] == rules.KERNEL:
-        # A kernel's use is not a package's: Sicil records none for it.
         return [
             Record(
                 cves=tuple(entry["cve"] for entry in detail["covered"]),
-                has_usage=False,
                 installed=detail["installed"],
                 **common,
             )

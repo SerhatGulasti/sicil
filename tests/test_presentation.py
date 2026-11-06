@@ -174,6 +174,46 @@ class Filtering(PresentationCase):
             sorted(f["package"] for f in result.red + result.yellow), ["libtiff", "pam"]
         )
 
+    def mark_unmeasurable(self, last_seen):
+        self.fake.view = YoklamaView(
+            90,
+            frozenset(),
+            {"pam": last_seen, "libxml2": self.now - 2 * DAY},
+            (),
+            frozenset({"pam"}),
+        )
+        self.run_once()
+
+    def test_unused_does_not_list_an_unmeasurable_package_and_counts_it(self):
+        self.mark_unmeasurable(None)
+        result = self.filtered(unused=[30])
+        self.assertEqual(
+            sorted(f["package"] for f in result.red + result.yellow), ["libtiff"]
+        )
+        self.assertEqual(result.hidden, {"no last-used date": 1})
+        self.assertIn("1 record hidden: no last-used date", report.format_text(result))
+
+    def test_used_does_not_list_an_unmeasurable_package_and_counts_it(self):
+        self.mark_unmeasurable(self.now - DAY)
+        result = self.filtered(used=[7])
+        self.assertEqual([f["package"] for f in result.yellow], ["libxml2"])
+        self.assertEqual(result.red, [])
+        self.assertEqual(result.hidden, {"no last-used date": 1})
+
+    def test_a_date_on_an_unmeasurable_package_is_not_kept(self):
+        self.mark_unmeasurable(self.now - DAY)
+        pam = next(f for f in self.load().red + self.load().yellow if f["package"] == "pam")
+        self.assertIsNone(pam["last_used"])
+        self.assertTrue(pam["unmeasurable"])
+
+    def test_a_package_measurable_again_loses_the_mark(self):
+        self.mark_unmeasurable(None)
+        self.fake.view = YoklamaView(90, frozenset(), {"pam": self.now - DAY}, ())
+        self.run_once()
+        result = self.filtered(used=[7])
+        self.assertIn("pam", [f["package"] for f in result.red + result.yellow])
+        self.assertEqual(result.hidden, {})
+
     def test_used(self):
         result = self.filtered(used=[7])
         self.assertEqual([f["package"] for f in result.yellow], ["libxml2"])
@@ -659,6 +699,28 @@ class YoklamaBrokenAtRun(PresentationCase):
         code, _, err = self.cli("report", "--unused", "30")
         self.assertEqual(code, 1)
         self.assertIn("got no usage data", err)
+
+
+class DatabaseBeforeTheUnmeasurableList(PresentationCase):
+    def setUp(self):
+        super().setUp()
+        self.fake.adv = [advisory()]
+        self.fake.view = YoklamaView(90, frozenset(), {}, ())
+        self.run_once()
+        self.store.db.executescript(
+            "ALTER TABLE findings DROP COLUMN unmeasurable; PRAGMA user_version = 3;"
+        )
+
+    def test_usage_filters_refuse_until_the_next_run(self):
+        for flag in ("--unused", "--used"):
+            code, out, err = self.cli("report", flag, "30")
+            self.assertEqual(code, 1)
+            self.assertEqual(out, "")
+            self.assertIn("`sicil run` will add it", err)
+
+    def test_the_report_and_other_filters_still_work(self):
+        self.assertIn("pam:CVE-", self.cli("report")[1])
+        self.assertIn("pam:CVE-", self.cli("report", "-p", "pam")[1])
 
 
 class ShowSources:

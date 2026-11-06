@@ -54,7 +54,8 @@ class Record:
     cves: tuple[str, ...] | None = None
     severity: str | None = None
     cvss: float | None = None
-    # None with has_usage is a package never seen in use, which is a value.
+    # None with has_usage is a package never seen in use, which is a value. No usage
+    # means there is nothing to judge: a kernel, or a package Yoklama can't measure.
     last_used: int | None = None
     has_usage: bool = True
     installed: str | None = None

@@ -460,12 +460,13 @@ class Enriching(EnrichCase):
         self.run_once()
         self.store.db.executescript(
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
-            " ALTER TABLE runs DROP COLUMN kernel_ok; PRAGMA user_version = 2;"
+            " ALTER TABLE runs DROP COLUMN kernel_ok;"
+            " ALTER TABLE findings DROP COLUMN unmeasurable; PRAGMA user_version = 2;"
         )
         self.store.close()
         self.store = Store(self.path)
         self.addCleanup(self.store.close)
-        self.assertEqual(self.rows("PRAGMA user_version"), [(3,)])
+        self.assertEqual(self.rows("PRAGMA user_version"), [(4,)])
         self.assertEqual(len(self.store.open_findings()), 1)
         self.run_once()
 
@@ -475,12 +476,13 @@ class Enriching(EnrichCase):
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
             " ALTER TABLE runs DROP COLUMN kernel_ok;"
             " ALTER TABLE aur_state DROP COLUMN co_maintainers;"
+            " ALTER TABLE findings DROP COLUMN unmeasurable;"
             " PRAGMA user_version = 1;"
         )
         self.store.close()
         self.store = Store(self.path)
         self.addCleanup(self.store.close)
-        self.assertEqual(self.rows("PRAGMA user_version"), [(3,)])
+        self.assertEqual(self.rows("PRAGMA user_version"), [(4,)])
         self.run_once()
 
 

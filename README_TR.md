@@ -104,7 +104,7 @@ libxml2, CVSS'i de 7 ve üstü" demektir.
 | CVE | `--cve <id>` | Joker çalışır: `'CVE-2021-*'`. Çekirdekte eşleşen ID'leri listeler |
 | Ciddiyet | `-s`, `--severity <seviye>` | Bu seviye ve üstü: `-s medium` medium, high ve critical demektir. Unknown yalnız `-s unknown` ile gelir |
 | CVSS | `-c`, `--min-cvss <puan>` | Bu puan ve üstü. CNA'nın puanı, o yoksa CISA-ADP'ninki |
-| Son kullanım | `--unused <gün>`, `--used <gün>` | Hiç kullanılmamış paket kullanılmayan sayılır. Yoklama yoksa boş liste dönmez, hata verir |
+| Son kullanım | `--unused <gün>`, `--used <gün>` | Hiç kullanılmamış paket kullanılmayan sayılır. Yoklama'nın ölçemediği paket listelenmez, `no last-used date` diye sayılır. Yoklama yoksa boş liste dönmez, hata verir |
 | Kurulu sürüm | `--installed-min`, `--installed-max` | Metin olarak değil, pacman'ın `vercmp` kuralıyla karşılaştırılır |
 | Kayıt sürümü | `--record-min`, `--record-max` | Aynı kural |
 | Durum | `--status <durum>` | `open`, `unverified`, `looks-closed` |
@@ -240,8 +240,9 @@ Raporu ipucu olarak okuyun.
   onları bilmez.
 - AUR paketlerine CVE kontrolü yapılmaz. AUR adları upstream projelerle güvenilir biçimde eşleşmediği
   için bu paketlerden yalnız güvenilirlik sinyalleri toplanır.
-- `--unused`, "hiç kullanılmadı" ile "ölçülemiyor" arasındaki farkı göremez. Yoklama ikisi için de son
-  kullanım tarihi vermez, ikisi de kullanılmayan sayılır.
+- `--unused` ile `--used`, Yoklama'nın ölçemediği paket hakkında bir şey söylemez. Böyle bir paket
+  Yoklama görmeden kullanılıyor olabilir, bu yüzden iki filtre de onu listelemez. Raporun sonunda
+  `no last-used date` diye sayılır.
 
 ## Geliştirme
 

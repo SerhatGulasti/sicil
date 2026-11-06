@@ -68,6 +68,7 @@ class YoklamaView:
     idle: frozenset[str]
     last_seen: dict[str, int | None]
     warnings: tuple[str, ...]
+    unmeasurable: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -213,6 +214,7 @@ def parse_yoklama(default_report: dict, full_report: dict) -> YoklamaView:
             idle=frozenset(row["name"] for row in default_report["idle"]),
             last_seen=last_seen,
             warnings=tuple(default_report["warnings"]),
+            unmeasurable=frozenset(row["name"] for row in full_report["unmeasurable"]),
         )
     except (KeyError, TypeError, ValueError) as e:
         raise SourceError(f"yoklama: unexpected JSON: {e!r}") from e

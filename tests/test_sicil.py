@@ -253,6 +253,7 @@ class YoklamaParsing(unittest.TestCase):
         self.assertEqual(view.idle, {"old"})
         self.assertEqual(view.last_seen["recent"], 9)
         self.assertIn("theme", view.last_seen)
+        self.assertEqual(view.unmeasurable, frozenset({"theme"}))
         self.assertEqual(view.warnings, ("w",))
 
     def test_changed_shape_is_a_source_error(self):
@@ -630,13 +631,14 @@ class Runs(RunCase):
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
             " ALTER TABLE runs DROP COLUMN kernel_ok;"
             " ALTER TABLE aur_state DROP COLUMN co_maintainers;"
+            " ALTER TABLE findings DROP COLUMN unmeasurable;"
             " PRAGMA user_version = 1;"
         )
         self.store.close()
         self.store = Store(self.path)
         self.addCleanup(self.store.close)
         version = self.rows("PRAGMA user_version")[0][0]
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
         self.assertIsNone(self.store.aur_state()["foo"].co_maintainers)
         self.run_once()
         self.assertEqual(self.open_aur(), [])
