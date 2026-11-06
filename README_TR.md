@@ -29,6 +29,13 @@ systemctl --user enable --now sicil.timer
 ln -s ~/.daemons/sicil/bin/sicil ~/.local/bin/sicil    # `sicil` diye çağırmak için
 ```
 
+İstersen fish tamamlamalarını da kurabilirsin, bunlar kayıtlı ID'leri ve paket adlarını da önerir:
+
+```sh
+mkdir -p ~/.config/fish/completions
+ln -s ~/.daemons/sicil/completions/sicil.fish ~/.config/fish/completions/sicil.fish
+```
+
 Zamanlayıcı her gün 10.00 civarında çalışır. Servis `nm-online` bağlantıyı bildirince ya da iki
 dakika sonra başlar. Bilgisayar kapalıyken kaçan çalıştırma bir sonraki açılışta yapılır.
 Kullanıcı zamanlayıcıları yalnız oturum açıkken çalışır, bildirim de zaten ancak o zaman görülür.
@@ -258,6 +265,7 @@ dokunmadan denemek için `--db` kullanın. Çekirdek klasörü verdiğiniz verit
 ```sh
 systemctl --user disable --now sicil.timer
 rm ~/.local/bin/sicil
+rm -f ~/.config/fish/completions/sicil.fish
 ```
 
 Toplanan veri `~/.local/state/sicil` altında kalır, istemiyorsanız onu da silin.

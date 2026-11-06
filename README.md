@@ -30,6 +30,13 @@ systemctl --user enable --now sicil.timer
 ln -s ~/.daemons/sicil/bin/sicil ~/.local/bin/sicil    # to call it as `sicil`
 ```
 
+Optional fish completions, which also offer the recorded IDs and package names:
+
+```sh
+mkdir -p ~/.config/fish/completions
+ln -s ~/.daemons/sicil/completions/sicil.fish ~/.config/fish/completions/sicil.fish
+```
+
 The timer runs around 10:00 every day, once `nm-online` reports a connection or after
 two minutes. A run missed while the computer was off happens at the next start. User
 timers only run while you are logged in, which is also when a notification can be seen.
@@ -259,6 +266,7 @@ whichever database you name.
 ```sh
 systemctl --user disable --now sicil.timer
 rm ~/.local/bin/sicil
+rm -f ~/.config/fish/completions/sicil.fish
 ```
 
 Collected data stays under `~/.local/state/sicil`; delete it too if you don't want it.
