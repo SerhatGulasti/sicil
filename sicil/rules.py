@@ -241,11 +241,27 @@ def carry_events(
     return kept + carried
 
 
+def describe_key(key: str) -> str:
+    """A finding's key in words. Tracker group numbers mean nothing to a reader."""
+    return {
+        "maintainer_changed": "maintainer changed",
+        "removed": "removed from AUR",
+        "co_maintainer_added": "new co-maintainer",
+        "orphan": "orphan",
+        "out_of_date": "flagged out of date",
+        "not_found": "not found in AUR",
+        "kernel": "kernel",
+    }.get(key, "known vulnerability")
+
+
 def notification(reds: list[tuple[str, str]]) -> tuple[str, str]:
     """Title and body for (package, key) pairs: always one notification."""
     if len(reds) == 1:
         package, key = reds[0]
-        return "Sicil: new red finding", f"{package}: {key}\nSee: sicil report"
+        return (
+            "Sicil: new red finding",
+            f"{package}: {describe_key(key)}\nSee: sicil report",
+        )
     packages = sorted({package for package, _ in reds})
     shown = ", ".join(packages[:MAX_PACKAGES_NOTIFIED])
     extra = len(packages) - MAX_PACKAGES_NOTIFIED

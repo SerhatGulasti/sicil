@@ -505,7 +505,7 @@ class KernelRuns(RunCase):
         result = self.run_once()
         self.assertFalse(result.kernel_ok)
         self.assertEqual(self.findings()["linux-cachyos-lts"].level, rules.INFO)
-        self.assertTrue(any("kernel strip skipped" in w for w in result.warnings))
+        self.assertTrue(any("kernel check skipped" in w for w in result.warnings))
         self.assertTrue(result.repo_ok)
 
     def test_failed_update_still_reads_the_old_list(self):
@@ -537,7 +537,7 @@ class KernelRuns(RunCase):
     def test_report_is_a_summary_in_the_agreed_words(self):
         self.run_once()
         text = self.text()
-        self.assertIn("Kernels (for information", text)
+        self.assertIn("Kernels: for information", text)
         self.assertIn("6.18.55 (running)", text)
         self.assertIn("branch latest 6.18.60, 5 behind", text)
         self.assertIn("repo still has 6.18.55-2", text)
@@ -553,7 +553,13 @@ class KernelRuns(RunCase):
         kernels = {k["package"]: k for k in data["kernels"]}
         self.assertEqual(
             kernels["linux-cachyos-lts"]["detail"]["covered"],
-            [{"cve": "CVE-2026-99999", "fixed_in": "6.18.57"}],
+            [
+                {
+                    "cve": "CVE-2026-99999",
+                    "fixed_in": "6.18.57",
+                    "id": "linux-cachyos-lts:CVE-2026-99999",
+                }
+            ],
         )
 
     def test_yellow_kernel_shows_in_yellow_with_the_update(self):

@@ -45,6 +45,10 @@ class NotFound(SourceError):
     """The server answered, and has no such thing."""
 
 
+class YoklamaMissing(SourceError):
+    """The `yoklama` command does not exist here, which is a normal way to run Sicil."""
+
+
 @dataclass(frozen=True)
 class Advisory:
     package: str
@@ -235,6 +239,15 @@ def parse_kernel_releases(body: bytes) -> dict[str, KernelRelease]:
     return releases
 
 
+def kernel_rows(data: dict) -> tuple[dict, ...]:
+    return tuple(
+        row
+        for row in data["containers"]["cna"]["affected"]
+        if (row.get("vendor") or "").lower() == "linux"
+        and (row.get("product") or "").lower() == "linux"
+    )
+
+
 def read_kernel_records(directory: str) -> tuple[list[KernelRecord], int]:
     """The published records in a checkout, and how many could not be read.
 
@@ -251,13 +264,7 @@ def read_kernel_records(directory: str) -> tuple[list[KernelRecord], int]:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            rows = tuple(
-                row
-                for row in data["containers"]["cna"]["affected"]
-                if (row.get("vendor") or "").lower() == "linux"
-                and (row.get("product") or "").lower() == "linux"
-            )
-            records.append(KernelRecord(data["cveMetadata"]["cveId"], rows))
+            records.append(KernelRecord(data["cveMetadata"]["cveId"], kernel_rows(data)))
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             unreadable += 1
     return records, unreadable
@@ -325,6 +332,23 @@ class Sources:
             raise SourceError("no directory for the kernel CVE list")
         return read_kernel_records(self.kernel_dir)
 
+    def kernel_record(self, cve: str) -> dict | None:
+        """One record's JSON from the local checkout. The CVE's form is the caller's."""
+        if self.kernel_dir is None:
+            return None
+        paths = glob.glob(
+            os.path.join(self.kernel_dir, "cve", "published", "*", f"{cve}.json")
+        )
+        for path in paths:
+            if os.path.islink(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, ValueError):
+                return None
+        return None
+
     def kernel_releases(self) -> dict[str, KernelRelease]:
         return parse_kernel_releases(self._get(KERNEL_RELEASES_URL))
 
@@ -350,6 +374,17 @@ class Sources:
     def installed(self) -> dict[str, str]:
         lines = _run(["pacman", "-Q"]).splitlines()
         return dict(line.split()[:2] for line in lines if line.strip())
+
+    def installed_version(self, package: str) -> str | None:
+        """The version installed right now, or None if the package is not installed."""
+        try:
+            output = _run(["pacman", "-Q", package], empty_ok=True)
+        except SourceError as e:
+            if "was not found" in str(e):
+                return None
+            raise
+        fields = output.split()
+        return fields[1] if len(fields) >= 2 else None
 
     def foreign_packages(self) -> list[str]:
         return _run(["pacman", "-Qqm"], empty_ok=True).split()
@@ -415,6 +450,8 @@ class Sources:
         _run(["notify-send", "--app-name=Sicil", "--urgency=critical", title, body])
 
     def yoklama(self) -> YoklamaView:
+        if shutil.which("yoklama") is None:
+            raise YoklamaMissing("yoklama is not installed")
         base = ["yoklama", "report", "--all", "--json"]
         return parse_yoklama(
             _json(_run(base), "yoklama"),

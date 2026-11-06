@@ -374,6 +374,10 @@ class RunCase(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.fake = FakeSources()
         self.now = 1000
+        # Whether this machine has Yoklama must not decide what a test sees.
+        found = mock.patch("sicil.report.yoklama_installed", return_value=True)
+        found.start()
+        self.addCleanup(found.stop)
 
     def run_once(self):
         self.now += 100
@@ -535,7 +539,7 @@ class Runs(RunCase):
     def test_summary_names_failures(self):
         self.fake.fail = {"repo"}
         text = format_result(self.run_once())
-        self.assertIn("repo FAILED", text)
+        self.assertIn("Not checked this run: official packages.", text)
         self.assertIn("incomplete", text)
 
     def open_aur(self):
@@ -646,7 +650,8 @@ class Notifications(RunCase):
         self.assertEqual(len(self.fake.sent), 1)
         title, body = self.fake.sent[0]
         self.assertIn("new red finding", title)
-        self.assertIn("pam: AVG-1", body)
+        self.assertIn("pam: known vulnerability", body)
+        self.assertNotIn("AVG", body)
 
     def test_several_reds_make_one_summary(self):
         self.fake.adv = [
