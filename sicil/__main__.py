@@ -236,16 +236,77 @@ def _at_least_zero(text: str) -> int:
     return value
 
 
+TOP_DESCRIPTION = """\
+Check whether installed packages have known security problems.
+Only reads and reports: never installs, updates or removes anything.
+
+Commands:
+  run     check the sources and record what changed
+  report  show the recorded findings; no network; filters narrow them down
+  show    show one record, judged against the version installed now
+"""
+
+# The overview in `sicil -h`. A test keeps it in step with the flags of `sicil report`.
+TOP_HELP = """\
+Filters of `sicil report` (rules and examples: sicil report -h):
+  -p, --package NAME                  package name; 'lib*' works
+  --cve ID                            CVE ID; 'CVE-2021-*' works
+  -s, --severity LEVEL                low, medium, high, critical or unknown
+  -c, --min-cvss SCORE                this CVSS score and above
+  --unused DAYS, --used DAYS          last use, from Yoklama
+  --installed-min, --installed-max    installed version
+  --record-min, --record-max          version in the record
+  --status STATUS                     open, unverified or looks-closed
+
+Examples:
+  sicil run
+  sicil report -s high
+  sicil report -p 'lib*' -c 7
+  sicil show pam:CVE-2025-6020
+"""
+
+REPORT_DESCRIPTION = """\
+Show the recorded findings. Reads the database, never the network.
+Each row starts with an ID, package:CVE, to use with `sicil show`.
+"""
+
+FILTERS_DESCRIPTION = """\
+Different filters must all match; a repeated filter may match any value.
+A record hidden only because the filtered field is empty is counted at the
+end of the report. Quote wildcards, or the shell may expand them.
+"""
+
+REPORT_HELP = """\
+Examples:
+  sicil report -p pam -p libxml2 -c 7     pam or libxml2, with CVSS 7 or above
+  sicil report -p 'lib*' -s high          packages named lib*, high or critical
+  sicil report --cve 'CVE-2021-*' --json  CVEs from 2021, as JSON
+  sicil report -s low -s unknown          every severity, unknown included
+  sicil report --unused 60 --status open  open problems, not used for 60 days
+  sicil report --installed-max 5.9        installed version 5.9 or older
+"""
+
+
+def _help_layout(prog: str) -> argparse.HelpFormatter:
+    # Wide enough for --installed-min VERSION to keep its text on the same line.
+    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=28)
+
+
 def _add_filters(parser: argparse.ArgumentParser) -> None:
-    group = parser.add_argument_group(
-        "filters", "different filters must all match; a repeated filter may match any"
-    )
+    group = parser.add_argument_group("filters", FILTERS_DESCRIPTION)
     many = dict(action="append", default=[])
     group.add_argument(
-        "-p", "--package", metavar="NAME", help="package name, 'lib*' works", **many
+        "-p",
+        "--package",
+        metavar="NAME",
+        help="package name; wildcards work: 'lib*'",
+        **many,
     )
     group.add_argument(
-        "--cve", metavar="ID", help="CVE ID, 'CVE-2021-*' works", **many
+        "--cve",
+        metavar="ID",
+        help="CVE ID; wildcards work: 'CVE-2021-*'. On a kernel it lists the matching IDs",
+        **many,
     )
     group.add_argument(
         "-s",
@@ -253,8 +314,8 @@ def _add_filters(parser: argparse.ArgumentParser) -> None:
         metavar="LEVEL",
         type=str.lower,
         choices=filters_module.SEVERITY_CHOICES,
-        help="this level and above: low, medium, high, critical;"
-        " unknown only matches unknown",
+        help="this level and above: low, medium, high, critical."
+        " `-s unknown` alone shows unknown severity",
         **many,
     )
     group.add_argument(
@@ -262,63 +323,91 @@ def _add_filters(parser: argparse.ArgumentParser) -> None:
         "--min-cvss",
         metavar="SCORE",
         type=float,
-        help="this CVSS score and above",
+        help="this CVSS score and above (CNA, or else CISA-ADP)",
         **many,
     )
     group.add_argument(
         "--unused",
         metavar="DAYS",
         type=_at_least_zero,
-        help="not used for this many days; a package never used counts",
+        help="not used for this many days; a package never used counts."
+        " Needs Yoklama",
         **many,
     )
     group.add_argument(
         "--used",
         metavar="DAYS",
         type=_at_least_zero,
-        help="used within this many days",
+        help="used within this many days. Needs Yoklama",
         **many,
     )
     for name, what, bound in (
-        ("--installed-min", "installed version", "at least"),
-        ("--installed-max", "installed version", "at most"),
-        ("--record-min", "version in the record", "at least"),
-        ("--record-max", "version in the record", "at most"),
+        ("--installed-min", "installed version", "this or newer"),
+        ("--installed-max", "installed version", "this or older"),
+        ("--record-min", "version in the record", "this or newer"),
+        ("--record-max", "version in the record", "this or older"),
     ):
         group.add_argument(
-            name, metavar="VERSION", help=f"{what} {bound} this, by vercmp", **many
+            name,
+            metavar="VERSION",
+            help=f"{what} {bound}, compared by vercmp",
+            **many,
         )
     group.add_argument(
         "--status",
         metavar="STATUS",
         choices=filters_module.STATUS_CHOICES,
-        help="open, unverified or looks-closed",
+        help="open: red or yellow; unverified: can't verify; looks-closed: looks closed",
         **many,
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sicil")
-    commands = parser.add_subparsers(dest="command", required=True)
-    run_parser = commands.add_parser(
-        "run", help="check the sources and record what changed"
+def build_parser() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
+    """The parser and its `report` part, whose flags the overview must list."""
+    parser = argparse.ArgumentParser(
+        prog="sicil",
+        usage="sicil [-h] COMMAND ...",
+        description=TOP_DESCRIPTION,
+        epilog=TOP_HELP,
+        formatter_class=_help_layout,
     )
-    run_parser.add_argument("--db", default=DEFAULT_DB, help="database path")
+    # TOP_DESCRIPTION lists the commands: argparse would add a heading row of its own.
+    commands = parser.add_subparsers(
+        metavar="COMMAND", dest="command", required=True, help=argparse.SUPPRESS
+    )
+    db_help = "database path (default: ~/.local/state/sicil/sicil.db)"
+
+    run_parser = commands.add_parser(
+        "run",
+        description="Check the sources and record what changed.",
+        formatter_class=_help_layout,
+    )
+    run_parser.add_argument("--db", metavar="PATH", default=DEFAULT_DB, help=db_help)
     run_parser.set_defaults(func=run)
 
     report_parser = commands.add_parser(
-        "report", help="show the recorded findings, without touching the network"
+        "report",
+        usage="sicil report [-h] [--all] [--json] [--db PATH] [filters]",
+        description=REPORT_DESCRIPTION,
+        epilog=REPORT_HELP,
+        formatter_class=_help_layout,
     )
     report_parser.add_argument(
-        "--all", action="store_true", help="include closed findings"
+        "--all", action="store_true", help="also show closed findings"
     )
-    report_parser.add_argument("--json", action="store_true", help="print JSON")
-    report_parser.add_argument("--db", default=DEFAULT_DB, help="database path")
+    report_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print JSON, with the complete lists; filters apply to it too",
+    )
+    report_parser.add_argument("--db", metavar="PATH", default=DEFAULT_DB, help=db_help)
     _add_filters(report_parser)
     report_parser.set_defaults(func=report)
 
     show_parser = commands.add_parser(
-        "show", help="show one record, judged against the version installed now"
+        "show",
+        description="Show one record, judged against the version installed now.",
+        formatter_class=_help_layout,
     )
     show_parser.add_argument(
         "id", metavar="ID", help="package:CVE-..., or CVE-... for every package with it"
@@ -330,9 +419,17 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FIELD",
         help="print one field bare: " + ", ".join(show_module.FIELDS),
     )
-    show_parser.add_argument("--db", default=DEFAULT_DB, help="database path")
+    show_parser.add_argument("--db", metavar="PATH", default=DEFAULT_DB, help=db_help)
     show_parser.set_defaults(func=show)
+    return parser, report_parser
 
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    parser, _ = build_parser()
+    # `sicil -h report` asks the same thing as `sicil report -h`.
+    if len(argv) == 2 and argv[0] in ("-h", "--help") and argv[1] in ("run", "report", "show"):
+        argv = [argv[1], argv[0]]
     args = parser.parse_args(argv)
     return args.func(args)
 

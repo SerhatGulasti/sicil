@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import shutil
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ import unicodedata
 from unittest import mock
 
 from sicil import report, rules, show, sources
-from sicil.__main__ import format_result, main, terminal_width
+from sicil.__main__ import build_parser, format_result, main, terminal_width
 from sicil.filters import Filters
 from sicil.sources import SourceError, YoklamaView
 
@@ -862,6 +863,78 @@ class ShowingKernels(PresentationCase):
         code, out, _ = self.show("linux-cachyos-lts:CVE-2026-99999")
         self.assertEqual(code, 0)
         self.assertRegex(out, r"Fixed in\s+6\.18\.57")
+
+
+class HelpText(unittest.TestCase):
+    def help_of(self, *arguments, columns="80"):
+        out = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"COLUMNS": columns, "NO_COLOR": "1"}),
+            contextlib.redirect_stdout(out),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            main(list(arguments))
+        self.assertEqual(caught.exception.code, 0)
+        return out.getvalue()
+
+    def report_flags(self):
+        _, report_parser = build_parser()
+        group = next(
+            g for g in report_parser._action_groups if g.title == "filters"
+        )
+        return [flag for action in group._group_actions for flag in action.option_strings]
+
+    def test_top_help_lists_the_commands(self):
+        text = self.help_of("-h")
+        self.assertTrue(text.startswith("usage: sicil [-h] COMMAND ...\n"))
+        for command in ("run", "report", "show"):
+            self.assertRegex(text, rf"(?m)^  {command} ")
+        self.assertNotIn("positional arguments", text)
+
+    def test_top_help_lists_every_filter(self):
+        text = self.help_of("-h")
+        for flag in self.report_flags():
+            self.assertIn(flag, text)
+
+    def test_report_help_explains_every_filter_and_how_they_combine(self):
+        text = " ".join(self.help_of("report", "-h").split())
+        for flag in self.report_flags():
+            self.assertIn(flag, text)
+        self.assertIn("must all match", text)
+        self.assertIn("a repeated filter may match any value", text)
+        self.assertIn("counted at the end", text)
+        self.assertIn("Needs Yoklama", text)
+        self.assertIn("-p pam -p libxml2 -c 7", text)
+
+    def test_report_usage_is_short(self):
+        usage = self.help_of("report", "-h").split("\n\n")[0]
+        self.assertEqual(
+            usage, "usage: sicil report [-h] [--all] [--json] [--db PATH] [filters]"
+        )
+
+    def test_flag_before_the_command_asks_the_same(self):
+        self.assertEqual(self.help_of("-h", "report"), self.help_of("report", "-h"))
+        self.assertEqual(self.help_of("--help", "show"), self.help_of("show", "--help"))
+
+    def test_help_fits_eighty_columns(self):
+        for arguments in (("-h",), ("report", "-h"), ("run", "-h"), ("show", "-h")):
+            for line in self.help_of(*arguments).split("\n"):
+                self.assertLessEqual(len(line), 80, line)
+
+    def test_help_examples_really_parse(self):
+        text = self.help_of("-h") + self.help_of("report", "-h")
+        parser, _ = build_parser()
+        examples = [
+            line.strip()
+            for line in text.split("\n")
+            if line.startswith("  sicil ")
+        ]
+        self.assertGreaterEqual(len(examples), 8)
+        for line in examples:
+            # What follows two spaces is the example's explanation.
+            words = shlex.split(line.split("  ")[0])[1:]
+            with self.subTest(line):
+                parser.parse_args(words)
 
 
 class RealSources(unittest.TestCase):
