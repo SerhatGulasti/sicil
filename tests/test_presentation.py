@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import shutil
+import sqlite3
 import tempfile
 import unittest
 import unicodedata
@@ -15,6 +16,7 @@ from sicil import report, rules, show, sources
 from sicil.__main__ import build_parser, format_result, main, terminal_width
 from sicil.filters import Filters
 from sicil.sources import SourceError, YoklamaView
+from sicil.store import SCHEMA_VERSION, NewerSchema, Store
 
 from test_enrich import real_record
 from test_kernel import REAL, KernelSources
@@ -721,6 +723,49 @@ class DatabaseBeforeTheUnmeasurableList(PresentationCase):
     def test_the_report_and_other_filters_still_work(self):
         self.assertIn("pam:CVE-", self.cli("report")[1])
         self.assertIn("pam:CVE-", self.cli("report", "-p", "pam")[1])
+
+
+class DatabaseFromANewerSicil(PresentationCase):
+    MESSAGE = f"database schema 99 is newer than this sicil ({SCHEMA_VERSION}); update sicil"
+
+    def setUp(self):
+        super().setUp()
+        self.fake.adv = [advisory()]
+        self.run_once()
+        self.store.db.execute("PRAGMA user_version = 99")
+
+    def state(self):
+        self.store.db.commit()
+        db = sqlite3.connect(self.path)
+        try:
+            return (
+                db.execute("PRAGMA user_version").fetchone()[0],
+                db.execute("SELECT count(*) FROM runs").fetchone()[0],
+            )
+        finally:
+            db.close()
+
+    def test_opening_it_to_write_fails_and_changes_nothing(self):
+        before = self.state()
+        with self.assertRaises(NewerSchema) as caught:
+            Store(self.path)
+        self.assertEqual(str(caught.exception), self.MESSAGE)
+        self.assertEqual(self.state(), before)
+
+    def test_every_command_exits_with_the_message_and_changes_nothing(self):
+        before = self.state()
+        for command in (["run"], ["report"], ["report", "-p", "pam"], ["show", "pam:CVE-2021-1234"]):
+            code, out, err = self.cli(*command)
+            self.assertEqual(code, 1, command)
+            self.assertEqual(out, "", command)
+            self.assertIn(self.MESSAGE, err, command)
+        self.assertEqual(self.state(), before)
+
+    def test_the_current_schema_still_opens(self):
+        self.store.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self.store.db.commit()
+        Store(self.path).close()
+        self.assertEqual(self.state()[0], SCHEMA_VERSION)
 
 
 class ShowSources:

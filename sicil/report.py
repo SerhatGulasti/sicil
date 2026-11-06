@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from . import filters as filters_module
 from . import rules
 from .filters import Filters, Record
+from .store import SCHEMA_VERSION, newer_schema_message
 
 STALE_HOURS = 36
 MAX_LEAVES_SHOWN = 5
@@ -151,6 +152,9 @@ def load(
     db = _connect(path)
     db.row_factory = sqlite3.Row
     try:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            raise ReportError(f"{path}: {newer_schema_message(version)}")
         run = db.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
         if run is None:
             raise ReportError("no run recorded yet; try `sicil run` first")
@@ -158,7 +162,6 @@ def load(
             "SELECT * FROM findings WHERE closed_at IS NULL"
             + ("" if not all_findings else " OR closed_at IS NOT NULL")
         ).fetchall()
-        version = db.execute("PRAGMA user_version").fetchone()[0]
     except sqlite3.Error as e:
         raise ReportError(f"{path}: {e}") from e
     finally:

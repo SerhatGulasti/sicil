@@ -12,7 +12,7 @@ from . import rules, show as show_module
 from .report import YOKLAMA_NOT_FOUND
 from .run import RunResult, execute
 from .sources import SourceError, Sources
-from .store import Store
+from .store import NewerSchema, Store
 
 DEFAULT_DB = os.path.expanduser("~/.local/state/sicil/sicil.db")
 MAX_NAMES_SHOWN = 8
@@ -134,7 +134,7 @@ def run(args: argparse.Namespace) -> int:
             )
         finally:
             store.close()
-    except (OSError, sqlite3.Error) as e:
+    except (OSError, sqlite3.Error, NewerSchema) as e:
         print(f"sicil: {args.db}: {e}", file=sys.stderr)
         return 1
     print(format_result(result))

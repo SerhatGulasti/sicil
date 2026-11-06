@@ -77,6 +77,14 @@ MIGRATIONS = {
 }
 
 
+class NewerSchema(Exception):
+    """The database belongs to a newer Sicil: this one must not write to it."""
+
+
+def newer_schema_message(found: int) -> str:
+    return f"database schema {found} is newer than this sicil ({SCHEMA_VERSION}); update sicil"
+
+
 @dataclass
 class Diff:
     new: list[tuple[str, str, str]] = field(default_factory=list)
@@ -101,6 +109,9 @@ class Store:
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA foreign_keys = ON")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            self.db.close()
+            raise NewerSchema(newer_schema_message(version))
         if version == 0:
             steps = SCHEMA
         else:
