@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 
 from . import enrich, kernel, rules
 from .rules import AUR, KERNEL, REPO, Finding
-from .sources import SourceError, Sources, YoklamaView
+from .report import YOKLAMA_NOT_FOUND
+from .sources import SourceError, Sources, YoklamaMissing, YoklamaView
 from .store import Diff, Store
 
 
@@ -22,6 +23,8 @@ class RunResult:
     levels: dict[str, int] = field(default_factory=dict)
     removal_suggestions: int = 0
     notified: int = 0
+    # What this run learned about each kernel; empty if the kernel check was skipped.
+    kernels: dict[str, dict] = field(default_factory=dict)
 
 
 def _gather_repo(
@@ -89,7 +92,11 @@ def _annotate(
         if finding.strip == KERNEL:
             continue
         if view is not None:
-            store.set_last_used(finding.id, view.last_seen.get(finding.package))
+            # Yoklama may hold a date for such a package, but says it means nothing.
+            if finding.package in view.unmeasurable:
+                store.set_last_used(finding.id, None, unmeasurable=True)
+            else:
+                store.set_last_used(finding.id, view.last_seen.get(finding.package))
         if finding.level not in (rules.RED, rules.YELLOW) or leaves is None:
             store.annotate(finding.id, None, False)
             continue
@@ -122,11 +129,11 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
     try:
         repo_findings, gathered = _gather_repo(sources, store, started, warnings)
     except SourceError as e:
-        warnings.append(f"this run is incomplete: repo strip skipped: {e}")
+        warnings.append(f"this run is incomplete: official package check skipped: {e}")
     try:
         aur_names, aur_findings, aur_states = _gather_aur(sources, store)
     except SourceError as e:
-        warnings.append(f"this run is incomplete: AUR strip skipped: {e}")
+        warnings.append(f"this run is incomplete: AUR check skipped: {e}")
     kernel_findings = None
     try:
         kev = (
@@ -136,11 +143,13 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
         )
         kernel_findings = _gather_kernel(sources, kev, warnings)
     except SourceError as e:
-        warnings.append(f"this run is incomplete: kernel strip skipped: {e}")
+        warnings.append(f"this run is incomplete: kernel check skipped: {e}")
     view = None
     try:
         view = sources.yoklama()
         warnings.extend(view.warnings)
+    except YoklamaMissing:
+        warnings.append(YOKLAMA_NOT_FOUND)
     except SourceError as e:
         warnings.append(f"no usage data, no removal suggestions: {e}")
 
@@ -202,6 +211,7 @@ def execute(store: Store, sources: Sources, clock=time.time) -> RunResult:
         levels,
         suggestions,
         notified,
+        {f.package: f.detail for f in kernel_findings or []},
     )
 
 

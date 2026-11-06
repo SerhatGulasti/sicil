@@ -253,6 +253,7 @@ class YoklamaParsing(unittest.TestCase):
         self.assertEqual(view.idle, {"old"})
         self.assertEqual(view.last_seen["recent"], 9)
         self.assertIn("theme", view.last_seen)
+        self.assertEqual(view.unmeasurable, frozenset({"theme"}))
         self.assertEqual(view.warnings, ("w",))
 
     def test_changed_shape_is_a_source_error(self):
@@ -374,6 +375,10 @@ class RunCase(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.fake = FakeSources()
         self.now = 1000
+        # Whether this machine has Yoklama must not decide what a test sees.
+        found = mock.patch("sicil.report.yoklama_installed", return_value=True)
+        found.start()
+        self.addCleanup(found.stop)
 
     def run_once(self):
         self.now += 100
@@ -535,7 +540,7 @@ class Runs(RunCase):
     def test_summary_names_failures(self):
         self.fake.fail = {"repo"}
         text = format_result(self.run_once())
-        self.assertIn("repo FAILED", text)
+        self.assertIn("Not checked this run: official packages.", text)
         self.assertIn("incomplete", text)
 
     def open_aur(self):
@@ -626,13 +631,14 @@ class Runs(RunCase):
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
             " ALTER TABLE runs DROP COLUMN kernel_ok;"
             " ALTER TABLE aur_state DROP COLUMN co_maintainers;"
+            " ALTER TABLE findings DROP COLUMN unmeasurable;"
             " PRAGMA user_version = 1;"
         )
         self.store.close()
         self.store = Store(self.path)
         self.addCleanup(self.store.close)
         version = self.rows("PRAGMA user_version")[0][0]
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
         self.assertIsNone(self.store.aur_state()["foo"].co_maintainers)
         self.run_once()
         self.assertEqual(self.open_aur(), [])
@@ -646,7 +652,8 @@ class Notifications(RunCase):
         self.assertEqual(len(self.fake.sent), 1)
         title, body = self.fake.sent[0]
         self.assertIn("new red finding", title)
-        self.assertIn("pam: AVG-1", body)
+        self.assertIn("pam: known vulnerability", body)
+        self.assertNotIn("AVG", body)
 
     def test_several_reds_make_one_summary(self):
         self.fake.adv = [

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from .rules import AUR, EVENT_KEYS, AurState, Finding, OpenEvent
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 ENRICHMENT_TABLES = """
 CREATE TABLE cve_cache (
@@ -47,7 +47,8 @@ CREATE TABLE findings (
     closed_run INTEGER REFERENCES runs(id),
     last_used INTEGER,
     leaves TEXT,
-    suggest_removal INTEGER NOT NULL DEFAULT 0
+    suggest_removal INTEGER NOT NULL DEFAULT 0,
+    unmeasurable INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX findings_open
     ON findings (strip, package, key) WHERE closed_at IS NULL;
@@ -72,7 +73,16 @@ MIGRATIONS = {
     1: MIGRATE_1_TO_2,
     2: ENRICHMENT_TABLES
     + "ALTER TABLE runs ADD COLUMN kernel_ok INTEGER NOT NULL DEFAULT 1;",
+    3: "ALTER TABLE findings ADD COLUMN unmeasurable INTEGER NOT NULL DEFAULT 0;",
 }
+
+
+class NewerSchema(Exception):
+    """The database belongs to a newer Sicil: this one must not write to it."""
+
+
+def newer_schema_message(found: int) -> str:
+    return f"database schema {found} is newer than this sicil ({SCHEMA_VERSION}); update sicil"
 
 
 @dataclass
@@ -99,6 +109,9 @@ class Store:
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA foreign_keys = ON")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            self.db.close()
+            raise NewerSchema(newer_schema_message(version))
         if version == 0:
             steps = SCHEMA
         else:
@@ -266,9 +279,12 @@ class Store:
             ),
         )
 
-    def set_last_used(self, finding_id: int, last_used: int | None) -> None:
+    def set_last_used(
+        self, finding_id: int, last_used: int | None, unmeasurable: bool = False
+    ) -> None:
         self.db.execute(
-            "UPDATE findings SET last_used = ? WHERE id = ?", (last_used, finding_id)
+            "UPDATE findings SET last_used = ?, unmeasurable = ? WHERE id = ?",
+            (last_used, unmeasurable, finding_id),
         )
 
     def aur_state(self) -> dict[str, AurState]:

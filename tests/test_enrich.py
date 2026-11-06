@@ -460,12 +460,13 @@ class Enriching(EnrichCase):
         self.run_once()
         self.store.db.executescript(
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
-            " ALTER TABLE runs DROP COLUMN kernel_ok; PRAGMA user_version = 2;"
+            " ALTER TABLE runs DROP COLUMN kernel_ok;"
+            " ALTER TABLE findings DROP COLUMN unmeasurable; PRAGMA user_version = 2;"
         )
         self.store.close()
         self.store = Store(self.path)
         self.addCleanup(self.store.close)
-        self.assertEqual(self.rows("PRAGMA user_version"), [(3,)])
+        self.assertEqual(self.rows("PRAGMA user_version"), [(4,)])
         self.assertEqual(len(self.store.open_findings()), 1)
         self.run_once()
 
@@ -475,12 +476,13 @@ class Enriching(EnrichCase):
             "DROP TABLE cve_cache; DROP TABLE enrich_meta;"
             " ALTER TABLE runs DROP COLUMN kernel_ok;"
             " ALTER TABLE aur_state DROP COLUMN co_maintainers;"
+            " ALTER TABLE findings DROP COLUMN unmeasurable;"
             " PRAGMA user_version = 1;"
         )
         self.store.close()
         self.store = Store(self.path)
         self.addCleanup(self.store.close)
-        self.assertEqual(self.rows("PRAGMA user_version"), [(3,)])
+        self.assertEqual(self.rows("PRAGMA user_version"), [(4,)])
         self.run_once()
 
 
@@ -493,7 +495,7 @@ class Reporting(EnrichCase):
         self.run_once()
         text = self.text()
         self.assertIn("Looks closed", text)
-        self.assertIn("Unverified (no fix recorded, installed version is newer than the record): none", text)
+        self.assertIn("Can't verify: none", text)
         self.assertIn("7.8 CNA", text)
         self.assertIn("A flaw was found in linux-pam", text)
         data = json.loads(
@@ -533,7 +535,10 @@ class Reporting(EnrichCase):
         raw["containers"]["cna"]["descriptions"][0]["value"] = long
         self.fake.records = {"CVE-2025-6020": json.dumps(raw)}
         self.run_once()
-        self.assertNotIn(long.strip(), self.text())
+        self.store.db.commit()
+        narrow = report.format_text(report.load(self.path, now=self.now), width=80)
+        self.assertNotIn(long.strip(), narrow)
+        self.assertIn(long.strip(), self.text())  # nothing to fit in a pipe
         data = json.loads(report.format_json(report.load(self.path, now=self.now)))
         self.assertEqual(
             data["looks_closed"][0]["detail"]["enrichment"]["CVE-2025-6020"][
